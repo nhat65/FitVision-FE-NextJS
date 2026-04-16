@@ -5,6 +5,7 @@ export interface TokenResponse {
     id: string
     email: string
     name: string
+    roel: string
   }
 }
 
@@ -30,6 +31,7 @@ export function saveTokens(tokens: TokenResponse) {
   localStorage.setItem(ACCESS_TOKEN_KEY, tokens.accessToken)
   localStorage.setItem(REFRESH_TOKEN_KEY, tokens.refreshToken)
   localStorage.setItem(USER_KEY, JSON.stringify(tokens.user))
+  console.log(tokens.user)
 }
 
 // Clear tokens

@@ -1,5 +1,6 @@
 // API Configuration for backend communication
-export const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
+export const API_BASE_URL =
+  process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 
 // API endpoints
 export const API_ENDPOINTS = {
@@ -11,7 +12,7 @@ export const API_ENDPOINTS = {
     update: (id: string) => `${API_BASE_URL}/api/programs/${id}`,
     delete: (id: string) => `${API_BASE_URL}/api/programs/${id}`,
   },
-  
+
   // Exercises
   exercises: {
     getAll: `${API_BASE_URL}/api/exercises`,
@@ -20,7 +21,7 @@ export const API_ENDPOINTS = {
     update: (id: string) => `${API_BASE_URL}/api/exercises/${id}`,
     delete: (id: string) => `${API_BASE_URL}/api/exercises/${id}`,
   },
-  
+
   // Users
   users: {
     getAll: `${API_BASE_URL}/api/users`,
@@ -29,7 +30,15 @@ export const API_ENDPOINTS = {
     update: (id: string) => `${API_BASE_URL}/api/users/${id}`,
     delete: (id: string) => `${API_BASE_URL}/api/users/${id}`,
   },
-  
+
+  workout: {
+    getAll: `${API_BASE_URL}/api/workout-plan`,
+    getOne: (id: string) => `${API_BASE_URL}/api/workout-plan/${id}`,
+    create: `${API_BASE_URL}/api/users`,
+    update: (id: string) => `${API_BASE_URL}/api/users/${id}`,
+    delete: (id: string) => `${API_BASE_URL}/api/users/${id}`,
+  },
+
   // Subscriptions
   subscriptions: {
     getAll: `${API_BASE_URL}/api/subscriptions`,
@@ -39,36 +48,37 @@ export const API_ENDPOINTS = {
     delete: (id: string) => `${API_BASE_URL}/api/subscriptions/${id}`,
     enrollProgram: `${API_BASE_URL}/api/subscriptions/enroll`,
   },
-}
+};
 
 // Helper function to get API URL
 export function getAPIUrl(endpoint: string): string {
-  console.log('jejeje')
-  return `${API_BASE_URL}${endpoint}`
+  return `${API_BASE_URL}${endpoint}`;
 }
 
 // Helper function to make API calls with error handling
 export async function apiCall<T>(
   url: string,
-  options?: RequestInit
+  options?: RequestInit,
 ): Promise<{ data?: T; error?: string }> {
   try {
     const response = await fetch(url, {
       ...options,
       headers: {
-        'Content-Type': 'application/json',
+        "Content-Type": "application/json",
         ...options?.headers,
       },
-    })
+    });
 
     if (!response.ok) {
-      return { error: `API Error: ${response.status} ${response.statusText}` }
+      return { error: `API Error: ${response.status} ${response.statusText}` };
     }
 
-    const data = await response.json()
-    return { data }
+    const data = await response.json();
+    return { data };
   } catch (error) {
-    console.error('[API Error]', error)
-    return { error: error instanceof Error ? error.message : 'Unknown error occurred' }
+    console.error("[API Error]", error);
+    return {
+      error: error instanceof Error ? error.message : "Unknown error occurred",
+    };
   }
 }

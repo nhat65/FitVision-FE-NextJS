@@ -9,6 +9,7 @@ export interface UserProfile {
   fitnessLevel: "beginner" | "intermediate" | "advanced"
   fitnessGoal: "weight-loss" | "muscle-gain" | "endurance" | "flexibility"
   isAdmin?: boolean
+  role?: string
   createdAt: string
 }
 
@@ -39,7 +40,7 @@ export function isLoggedIn(): boolean {
 // Check if current user is admin
 export function isAdmin(): boolean {
   const user = getCurrentUser()
-  return user?.isAdmin === true
+  return user?.role === 'admin'
 }
 
 // Login user
@@ -73,81 +74,82 @@ export function loginUser(email: string, password: string): { success: boolean; 
 }
 
 // Initialize demo admin account if no users exist
-export function initializeDemoAdmin(): void {
-  if (typeof window === "undefined") return
+// export function initializeDemoAdmin(): void {
+//   if (typeof window === "undefined") return
   
-  const usersData = localStorage.getItem(STORAGE_KEY)
-  const users: UserProfile[] = usersData ? JSON.parse(usersData) : []
+//   const usersData = localStorage.getItem(STORAGE_KEY)
+//   const users: UserProfile[] = usersData ? JSON.parse(usersData) : []
   
-  // Only initialize if no users exist
-  if (users.length === 0) {
-    const adminUser: UserProfile = {
-      id: "admin_demo",
-      email: "admin@fitvision.com",
-      name: "Admin User",
-      height: 175,
-      weight: 75,
-      fitnessLevel: "advanced",
-      fitnessGoal: "muscle-gain",
-      isAdmin: true,
-      createdAt: new Date().toISOString()
-    }
+//   // Only initialize if no users exist
+//   if (users.length === 0) {
+//     const adminUser: UserProfile = {
+//       id: "admin_demo",
+//       email: "admin@fitvision.com",
+//       name: "Admin User",
+//       height: 175,
+//       weight: 75,
+//       fitnessLevel: "advanced",
+//       fitnessGoal: "muscle-gain",
+//       isAdmin: true,
+//       role: 
+//       createdAt: new Date().toISOString()
+//     }
     
-    users.push(adminUser)
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(users))
+//     users.push(adminUser)
+//     localStorage.setItem(STORAGE_KEY, JSON.stringify(users))
     
-    // Store demo admin password
-    const passwords: Record<string, string> = {}
-    passwords[adminUser.id] = "admin123"
-    localStorage.setItem("fitvision_passwords", JSON.stringify(passwords))
-  }
-}
+//     // Store demo admin password
+//     const passwords: Record<string, string> = {}
+//     passwords[adminUser.id] = "admin123"
+//     localStorage.setItem("fitvision_passwords", JSON.stringify(passwords))
+//   }
+// }
 
 // Register new user
-export function registerUser(data: {
-  email: string
-  password: string
-  name: string
-  height: number
-  weight: number
-  fitnessLevel: UserProfile["fitnessLevel"]
-  fitnessGoal: UserProfile["fitnessGoal"]
-}): { success: boolean; error?: string; user?: UserProfile } {
-  if (typeof window === "undefined") return { success: false, error: "Not available" }
+// export function registerUser(data: {
+//   email: string
+//   password: string
+//   name: string
+//   height: number
+//   weight: number
+//   fitnessLevel: UserProfile["fitnessLevel"]
+//   fitnessGoal: UserProfile["fitnessGoal"]
+// }): { success: boolean; error?: string; user?: UserProfile } {
+//   if (typeof window === "undefined") return { success: false, error: "Not available" }
   
-  const usersData = localStorage.getItem(STORAGE_KEY)
-  const users: UserProfile[] = usersData ? JSON.parse(usersData) : []
+//   const usersData = localStorage.getItem(STORAGE_KEY)
+//   const users: UserProfile[] = usersData ? JSON.parse(usersData) : []
   
-  // Check if email already exists
-  if (users.some(u => u.email.toLowerCase() === data.email.toLowerCase())) {
-    return { success: false, error: "Email already registered" }
-  }
+//   // Check if email already exists
+//   if (users.some(u => u.email.toLowerCase() === data.email.toLowerCase())) {
+//     return { success: false, error: "Email already registered" }
+//   }
   
-  const newUser: UserProfile = {
-    id: crypto.randomUUID(),
-    email: data.email,
-    name: data.name,
-    height: data.height,
-    weight: data.weight,
-    fitnessLevel: data.fitnessLevel,
-    fitnessGoal: data.fitnessGoal,
-    createdAt: new Date().toISOString()
-  }
+//   const newUser: UserProfile = {
+//     id: crypto.randomUUID(),
+//     email: data.email,
+//     name: data.name,
+//     height: data.height,
+//     weight: data.weight,
+//     fitnessLevel: data.fitnessLevel,
+//     fitnessGoal: data.fitnessGoal,
+//     createdAt: new Date().toISOString()
+//   }
   
-  users.push(newUser)
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(users))
+//   users.push(newUser)
+//   localStorage.setItem(STORAGE_KEY, JSON.stringify(users))
   
-  // Store password separately (in real app, this would be hashed)
-  const passwordsData = localStorage.getItem("fitvision_passwords")
-  const passwords: Record<string, string> = passwordsData ? JSON.parse(passwordsData) : {}
-  passwords[newUser.id] = data.password
-  localStorage.setItem("fitvision_passwords", JSON.stringify(passwords))
+//   // Store password separately (in real app, this would be hashed)
+//   const passwordsData = localStorage.getItem("fitvision_passwords")
+//   const passwords: Record<string, string> = passwordsData ? JSON.parse(passwordsData) : {}
+//   passwords[newUser.id] = data.password
+//   localStorage.setItem("fitvision_passwords", JSON.stringify(passwords))
   
-  // Auto login after registration
-  localStorage.setItem(AUTH_KEY, JSON.stringify({ userId: newUser.id, loggedInAt: new Date().toISOString() }))
+//   // Auto login after registration
+//   localStorage.setItem(AUTH_KEY, JSON.stringify({ userId: newUser.id, loggedInAt: new Date().toISOString() }))
   
-  return { success: true, user: newUser }
-}
+//   return { success: true, user: newUser }
+// }
 
 // Logout user
 export function logoutUser(): void {

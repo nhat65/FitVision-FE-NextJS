@@ -6,12 +6,12 @@ import { HeroSection } from "@/components/landing/hero-section"
 import { FeaturesSection } from "@/components/landing/features-section"
 import { CTASection } from "@/components/landing/cta-section"
 import { useEffect } from "react"
-import { initializeDemoAdmin } from "@/lib/user-store"
+// import { initializeDemoAdmin } from "@/lib/user-store"
 
 export default function HomePage() {
   useEffect(() => {
     // Initialize demo admin account on first load
-    initializeDemoAdmin()
+    // initializeDemoAdmin()
   }, [])
   return (
     <div className="min-h-screen flex flex-col">

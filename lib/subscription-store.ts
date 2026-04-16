@@ -92,9 +92,9 @@ export function enrollProgram(
     return { success: false, error: 'Not available' }
 
   // Check if already enrolled
-  if (isProgramEnrolled(userId, programId)) {
-    return { success: false, error: 'Already enrolled in this program' }
-  }
+  // if (isProgramEnrolled(userId, programId)) {
+  //   return { success: false, error: 'Already enrolled in this program' }
+  // }
 
   const enrollment: ProgramEnrollment = {
     id: `enrollment_${userId}_${programId}_${Date.now()}`,
@@ -108,11 +108,11 @@ export function enrollProgram(
     totalSessions: 30,
   }
 
-  const data = localStorage.getItem(ENROLLMENTS_KEY)
-  let enrollments: ProgramEnrollment[] = data ? JSON.parse(data) : []
+  // const data = localStorage.getItem(ENROLLMENTS_KEY)
+  // let enrollments: ProgramEnrollment[] = data ? JSON.parse(data) : []
 
-  enrollments.push(enrollment)
-  localStorage.setItem(ENROLLMENTS_KEY, JSON.stringify(enrollments))
+  // enrollments.push(enrollment)
+  // localStorage.setItem(ENROLLMENTS_KEY, JSON.stringify(enrollments))
 
   return { success: true, enrollment }
 }

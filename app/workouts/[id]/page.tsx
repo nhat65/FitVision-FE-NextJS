@@ -7,27 +7,64 @@ import { Header } from '@/components/layout/header'
 import { Footer } from '@/components/layout/footer'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
-import {
-  workoutPrograms,
-  difficultyColors,
-  difficultyLabels,
-  DayWorkout,
-} from '@/lib/workout-data'
-import { PricingModal } from '@/components/payment/pricing-modal'
-import { isProgramEnrolled, getProgramEnrollment } from '@/lib/subscription-store'
-import { getCurrentUser, type UserProfile } from '@/lib/user-store'
+import { Skeleton } from '@/components/ui/skeleton'
 import {
   ArrowLeft,
   Clock,
   Flame,
   Play,
-  Camera,
   Target,
   Calendar,
   CheckCircle2,
   Coffee,
   Lock,
 } from 'lucide-react'
+import { PricingModal } from '@/components/payment/pricing-modal'
+import { isProgramEnrolled, getProgramEnrollment } from '@/lib/subscription-store'
+import { getCurrentUser, type UserProfile } from '@/lib/user-store'
+import { difficultyColors } from '@/lib/workout-data'
+
+export type DifficultyLevel = "beginner" | "intermediate" | "advanced"
+
+export interface Exercise {
+  id: string
+  name: string
+  description: string
+  muscleGroups: string[]
+  difficulty: DifficultyLevel
+  instructions: string[]
+  reps?: string
+  sets?: number
+  duration?: string
+  restTime: number // seconds
+  videoUrl?: string
+  thumbnailUrl?: string
+}
+
+export interface DayWorkout {
+  day: number
+  name: string
+  exercises: Exercise[]
+  isRestDay?: boolean
+  focusArea?: string
+}
+
+export type Workout = {
+id: string
+  name: string
+  description: string
+  difficulty: DifficultyLevel
+  totalDays: number
+  durationPerSession: string
+  caloriesPerSession: number
+  schedule: DayWorkout[]
+  category: "strength" | "cardio" | "flexibility" | "full-body"
+  imageUrl?: string
+  goals: string[]
+  isPremium?: boolean
+  price?: number
+  aiMonitoringFee?: number
+}
 
 interface WorkoutDetailPageProps {
   params: Promise<{ id: string }>
@@ -116,20 +153,55 @@ function DayCard({
 }
 
 export default function WorkoutDetailPage({ params }: WorkoutDetailPageProps) {
-  const { id } = use(params)
-  const workout = workoutPrograms.find((w) => w.id === id)
+  const { id } = use(params)   // vẫn giữ use(params) vì là Server Component props
+
+  const [workout, setWorkout] = useState<Workout | null>(null)
+  const [isLoading, setIsLoading] = useState(true)
+  const [error, setError] = useState<string>("")
+  
   const [activeWeek, setActiveWeek] = useState(1)
   const [pricingOpen, setPricingOpen] = useState(false)
-  const [isHydrated, setIsHydrated] = useState(false)
   const [user, setUser] = useState<UserProfile | null>(null)
   const [isEnrolled, setIsEnrolled] = useState(false)
   const [enrollment, setEnrollment] = useState<any>(null)
 
+  // Fetch workout detail từ API
+  useEffect(() => {
+    const fetchWorkout = async () => {
+      try {
+        setIsLoading(true)
+        setError("")
+
+        const response = await fetch(`/api/workout-plan/${id}`)
+
+        if (!response.ok) {
+          if (response.status === 404) {
+            notFound()
+          }
+          throw new Error('Failed to fetch workout details')
+        }
+
+        const data = await response.json()
+        const workoutData = data.data || data   // hỗ trợ cả hai dạng {data: ...} hoặc trực tiếp
+        
+        setWorkout(workoutData)
+      } catch (err: any) {
+        console.error("Error fetching workout:", err)
+        setError(err.message || "Không thể tải thông tin chương trình tập")
+      } finally {
+        setIsLoading(false)
+      }
+    }
+
+    fetchWorkout()
+  }, [id])
+
+  // Load user & enrollment status
   useEffect(() => {
     const currentUser = getCurrentUser()
     setUser(currentUser)
     
-    if (currentUser) {
+    if (currentUser && workout) {
       const enrolled = isProgramEnrolled(currentUser.id, id)
       setIsEnrolled(enrolled)
       
@@ -138,15 +210,50 @@ export default function WorkoutDetailPage({ params }: WorkoutDetailPageProps) {
         setEnrollment(enrollmentData)
       }
     }
-    
-    setIsHydrated(true)
-  }, [id])
+  }, [id, workout])
 
-  if (!workout) {
-    notFound()
+  // Loading state
+  if (isLoading) {
+    return (
+      <div className="min-h-screen flex flex-col">
+        <Header />
+        <main className="flex-1 pt-24 pb-16">
+          <div className="mx-auto max-w-6xl px-6 lg:px-8">
+            <Skeleton className="h-10 w-40 mb-8" />
+            <div className="space-y-8">
+              <Skeleton className="h-12 w-3/4" />
+              <Skeleton className="h-6 w-1/2" />
+              <div className="grid grid-cols-4 gap-4">
+                {Array.from({ length: 4 }).map((_, i) => (
+                  <Skeleton key={i} className="h-20" />
+                ))}
+              </div>
+            </div>
+          </div>
+        </main>
+        <Footer />
+      </div>
+    )
   }
 
-  // Group schedule by weeks
+  if (error || !workout) {
+    return (
+      <div className="min-h-screen flex flex-col">
+        <Header />
+        <main className="flex-1 pt-24 pb-16 flex items-center justify-center">
+          <div className="text-center">
+            <p className="text-destructive mb-4">{error || "Workout not found"}</p>
+            <Link href="/workouts">
+              <Button>Back to Workouts</Button>
+            </Link>
+          </div>
+        </main>
+        <Footer />
+      </div>
+    )
+  }
+
+  // Group schedule by weeks (4 tuần x 7 ngày)
   const weeks = [
     workout.schedule.slice(0, 7),
     workout.schedule.slice(7, 14),
@@ -159,6 +266,7 @@ export default function WorkoutDetailPage({ params }: WorkoutDetailPageProps) {
       <Header />
       <main className="flex-1 pt-24 pb-16">
         <div className="mx-auto max-w-6xl px-6 lg:px-8">
+          
           {/* Back button */}
           <Link href="/workouts" className="flex items-center gap-2 text-primary hover:text-primary/80 mb-8">
             <ArrowLeft className="w-4 h-4" />
@@ -170,12 +278,8 @@ export default function WorkoutDetailPage({ params }: WorkoutDetailPageProps) {
             <div className="flex items-start justify-between gap-4 mb-4">
               <div>
                 <div className="flex gap-2 mb-3">
-                  <span
-                    className={`inline-block px-3 py-1 text-xs font-medium rounded-full border ${
-                      difficultyColors[workout.difficulty]
-                    }`}
-                  >
-                    {difficultyLabels[workout.difficulty]}
+                  <span className={`inline-block px-3 py-1 text-xs font-medium rounded-full border ${difficultyColors[workout.difficulty] || 'bg-primary/10 text-primary'}`}>
+                    {workout.difficulty.charAt(0).toUpperCase() + workout.difficulty.slice(1)}
                   </span>
                   {workout.isPremium && (
                     <span className="inline-block px-3 py-1 text-xs font-medium rounded-full bg-accent/10 text-accent border border-accent/30">
@@ -186,25 +290,22 @@ export default function WorkoutDetailPage({ params }: WorkoutDetailPageProps) {
                 <h1 className="text-4xl font-bold tracking-tight">{workout.name}</h1>
                 <p className="mt-2 text-lg text-muted-foreground">{workout.description}</p>
               </div>
-              {isHydrated && (
-                <>
-                  {!isEnrolled ? (
-                    <Button
-                      size="lg"
-                      onClick={() => (user ? setPricingOpen(true) : (window.location.href = '/login'))}
-                      className="whitespace-nowrap"
-                    >
-                      Enroll Now
-                    </Button>
-                  ) : (
-                    <div className="bg-green-500/10 border border-green-500/30 rounded-lg px-4 py-2">
-                      <div className="text-sm font-semibold text-green-600">Enrolled</div>
-                      <div className="text-xs text-muted-foreground">
-                        Progress: {enrollment?.progress || 0}%
-                      </div>
-                    </div>
-                  )}
-                </>
+
+              {!isEnrolled ? (
+                <Button
+                  size="lg"
+                  onClick={() => (user ? setPricingOpen(true) : (window.location.href = '/login'))}
+                  className="whitespace-nowrap"
+                >
+                  Enroll Now
+                </Button>
+              ) : (
+                <div className="bg-green-500/10 border border-green-500/30 rounded-lg px-4 py-2">
+                  <div className="text-sm font-semibold text-green-600">Enrolled</div>
+                  <div className="text-xs text-muted-foreground">
+                    Progress: {enrollment?.progress || 0}%
+                  </div>
+                </div>
               )}
             </div>
 
@@ -259,64 +360,60 @@ export default function WorkoutDetailPage({ params }: WorkoutDetailPageProps) {
           </div>
 
           {/* 30-Day Schedule */}
-          {isHydrated && (
-            <>
-              {isEnrolled ? (
-                <div>
-                  <h2 className="text-2xl font-bold mb-8">30-Day Schedule</h2>
+          {isEnrolled ? (
+            <div>
+              <h2 className="text-2xl font-bold mb-8">30-Day Schedule</h2>
 
-                  {/* Week tabs */}
-                  <div className="flex gap-2 mb-8 overflow-x-auto">
-                    {[1, 2, 3, 4].map((week) => (
-                      <Button
-                        key={week}
-                        variant={activeWeek === week ? 'default' : 'outline'}
-                        onClick={() => setActiveWeek(week)}
-                        className="whitespace-nowrap"
-                      >
-                        Week {week}
-                      </Button>
-                    ))}
-                  </div>
-
-                  {/* Week content */}
-                  <div className="grid gap-4">
-                    {weeks[activeWeek - 1].map((dayWorkout) => (
-                      <DayCard
-                        key={dayWorkout.day}
-                        dayWorkout={dayWorkout}
-                        workoutId={id}
-                        isCompleted={
-                          enrollment?.sessionsCompleted
-                            ? enrollment.sessionsCompleted >= dayWorkout.day
-                            : false
-                        }
-                        isEnrolled={isEnrolled}
-                      />
-                    ))}
-                  </div>
-                </div>
-              ) : (
-                <div className="bg-secondary/30 border-2 border-dashed border-border rounded-xl p-8 text-center">
-                  <Lock className="w-12 h-12 text-muted-foreground mx-auto mb-4" />
-                  <h3 className="text-xl font-semibold mb-2">Program Locked</h3>
-                  <p className="text-muted-foreground mb-6">
-                    Enroll in this program to view the full 30-day schedule and start training.
-                  </p>
+              {/* Week tabs */}
+              <div className="flex gap-2 mb-8 overflow-x-auto pb-2">
+                {[1, 2, 3, 4].map((week) => (
                   <Button
-                    size="lg"
-                    onClick={() => (user ? setPricingOpen(true) : (window.location.href = '/login'))}
+                    key={week}
+                    variant={activeWeek === week ? 'default' : 'outline'}
+                    onClick={() => setActiveWeek(week)}
+                    className="whitespace-nowrap"
                   >
-                    Enroll Now
+                    Week {week}
                   </Button>
-                </div>
-              )}
-            </>
+                ))}
+              </div>
+
+              {/* Week content */}
+              <div className="grid gap-4">
+                {weeks[activeWeek - 1]?.map((dayWorkout) => (
+                  <DayCard
+                    key={dayWorkout.day}
+                    dayWorkout={dayWorkout}
+                    workoutId={id}
+                    isCompleted={
+                      enrollment?.sessionsCompleted 
+                        ? enrollment.sessionsCompleted >= dayWorkout.day 
+                        : false
+                    }
+                    isEnrolled={isEnrolled}
+                  />
+                ))}
+              </div>
+            </div>
+          ) : (
+            <div className="bg-secondary/30 border-2 border-dashed border-border rounded-xl p-8 text-center">
+              <Lock className="w-12 h-12 text-muted-foreground mx-auto mb-4" />
+              <h3 className="text-xl font-semibold mb-2">Program Locked</h3>
+              <p className="text-muted-foreground mb-6">
+                Enroll in this program to view the full 30-day schedule and start training.
+              </p>
+              <Button
+                size="lg"
+                onClick={() => (user ? setPricingOpen(true) : (window.location.href = '/login'))}
+              >
+                Enroll Now
+              </Button>
+            </div>
           )}
         </div>
       </main>
 
-      {user && (
+      {user && workout && (
         <PricingModal
           open={pricingOpen}
           onOpenChange={setPricingOpen}
