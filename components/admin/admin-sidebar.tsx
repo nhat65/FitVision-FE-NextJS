@@ -3,6 +3,8 @@
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { LayoutDashboard, Users, Dumbbell, Zap, BarChart3, DollarSign, LogOut } from 'lucide-react'
+import { logoutUser } from '@/lib/user-store'
+import { Button } from '../ui/button'
 
 const menuItems = [
   { icon: LayoutDashboard, label: 'Dashboard', href: '/admin' },
@@ -24,7 +26,10 @@ export function AdminSidebar() {
   return (
     <aside className="w-64 bg-card border-r border-border min-h-screen flex flex-col">
       {/* Logo */}
-      <div className="p-6 border-b border-border">
+      <div
+        className="p-6 border-b border-border cursor-pointer"
+        onClick={() => router.push('/workouts')}
+      >
         <h1 className="text-2xl font-bold text-primary">FitVision</h1>
         <p className="text-xs text-muted-foreground mt-1">Admin Panel</p>
       </div>

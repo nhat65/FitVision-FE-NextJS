@@ -6,16 +6,38 @@ import { AdminSidebar } from '@/components/admin/admin-sidebar'
 import { Card } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { isAdmin, getCurrentUser } from '@/lib/user-store'
-import { getAdminStats, getUserActivityData, getProgramStats } from '@/lib/admin-store'
+import { getAccessToken } from '@/lib/auth-store'
 import { Users, Dumbbell, Zap, TrendingUp, Calendar, Activity } from 'lucide-react'
 import Link from 'next/link'
 
+interface DashboardStats {
+  totalUsers: number
+  activeUsers: number
+  totalPrograms: number
+  totalExercises: number
+  totalWorkoutsSessions: number
+  // Có thể thêm các trường khác từ backend
+}
+
+interface UserActivity {
+  userName: string
+  email: string
+  workoutsSessions: number
+  lastActive: string
+}
+
+interface ProgramStat {
+  programName: string
+  enrolledUsers: number
+}
+
 export default function AdminDashboard() {
   const router = useRouter()
-  const [stats, setStats] = useState<any>(null)
-  const [userActivity, setUserActivity] = useState<any[]>([])
-  const [programStats, setProgramStats] = useState<any[]>([])
+  const [stats, setStats] = useState<DashboardStats | null>(null)
+  const [userActivity, setUserActivity] = useState<UserActivity[]>([])
+  const [programStats, setProgramStats] = useState<ProgramStat[]>([])
   const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string>('')
 
   useEffect(() => {
     const user = getCurrentUser()
@@ -24,21 +46,65 @@ export default function AdminDashboard() {
       return
     }
 
-    // Load all stats
-    const adminStats = getAdminStats()
-    const userActivityData = getUserActivityData()
-    const programs = getProgramStats()
-
-    setStats(adminStats)
-    setUserActivity(userActivityData)
-    setProgramStats(programs)
-    setLoading(false)
+    fetchDashboardData()
   }, [router])
+
+  const fetchDashboardData = async () => {
+    try {
+      setLoading(true)
+      setError('')
+
+      const token = getAccessToken()
+      if (!token) {
+        router.push('/login')
+        return
+      }
+
+      const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/admin/dashboard-stats`, {
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+      })
+
+      if (!res.ok) {
+        throw new Error('Failed to fetch dashboard statistics')
+      }
+
+      const result = await res.json()
+      const data = result.data || result
+console.log(data)
+      setStats({
+        totalUsers: data.totalUsers || 0,
+        activeUsers: data.activeUsers || 0,
+        totalPrograms: data.totalPrograms || 0,
+        totalExercises: data.totalExercises || 0,
+        totalWorkoutsSessions: data.totalWorkoutsSessions || 0,
+      })
+
+      setUserActivity(data.recentActivity || [])
+      setProgramStats(data.topPrograms || [])
+
+    } catch (err: any) {
+      console.error(err)
+      setError(err.message || 'Failed to load dashboard data')
+    } finally {
+      setLoading(false)
+    }
+  }
 
   if (loading) {
     return (
       <div className="flex items-center justify-center min-h-screen">
-        <p className="text-muted-foreground">Loading...</p>
+        <p className="text-muted-foreground">Loading dashboard...</p>
+      </div>
+    )
+  }
+
+  if (error) {
+    return (
+      <div className="flex items-center justify-center min-h-screen">
+        <p className="text-destructive">{error}</p>
       </div>
     )
   }
@@ -107,7 +173,7 @@ export default function AdminDashboard() {
             </Card>
           </div>
 
-          {/* Recent Users Activity */}
+          {/* Recent Users Activity & Top Programs */}
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
             <Card className="lg:col-span-2 p-6">
               <h2 className="text-xl font-bold mb-4">Recent User Activity</h2>
@@ -146,7 +212,7 @@ export default function AdminDashboard() {
                         <div
                           className="h-full bg-primary"
                           style={{
-                            width: `${(program.enrolledUsers / (stats?.totalUsers || 1)) * 100}%`,
+                            width: `${Math.min((program.enrolledUsers / (stats?.totalUsers || 1)) * 100, 100)}%`,
                           }}
                         />
                       </div>

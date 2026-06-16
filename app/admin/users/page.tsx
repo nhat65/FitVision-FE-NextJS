@@ -1,14 +1,13 @@
-'use client'
+"use client";
 
-import { useEffect, useState } from 'react'
-import { useRouter } from 'next/navigation'
-import { AdminSidebar } from '@/components/admin/admin-sidebar'
-import { Card } from '@/components/ui/card'
-import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
-import { isAdmin, getCurrentUser } from '@/lib/user-store'
-import { deleteUser, getUserActivityData } from '@/lib/admin-store'
-import { Trash2, Eye, Search } from 'lucide-react'
+import { useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
+import { AdminSidebar } from "@/components/admin/admin-sidebar";
+import { Card } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { isAdmin, getCurrentUser } from "@/lib/user-store";
+import { Trash2, Eye, Search, Loader2 } from "lucide-react";
 import {
   Table,
   TableBody,
@@ -16,60 +15,129 @@ import {
   TableHead,
   TableHeader,
   TableRow,
-} from '@/components/ui/table'
+} from "@/components/ui/table";
+import { toast } from "sonner";
+import { getAccessToken } from "@/lib/auth-store";
 
 interface User {
-  userId: string
-  userName: string
-  email: string
-  lastActive: Date
-  workoutsSessions: number
-  currentProgram: string | null
+  userId: string;
+  userName: string;
+  email: string;
+  lastActive: string | Date;
+  workoutsSessions: number;
+  currentProgram: string | null;
 }
 
 export default function UsersManagement() {
-  const router = useRouter()
-  const [users, setUsers] = useState<User[]>([])
-  const [filteredUsers, setFilteredUsers] = useState<User[]>([])
-  const [searchTerm, setSearchTerm] = useState('')
-  const [loading, setLoading] = useState(true)
-  const [selectedUser, setSelectedUser] = useState<User | null>(null)
+  const router = useRouter();
+  const [users, setUsers] = useState<User[]>([]);
+  const [filteredUsers, setFilteredUsers] = useState<User[]>([]);
+  const [searchTerm, setSearchTerm] = useState("");
+  const [loading, setLoading] = useState(true);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [selectedUser, setSelectedUser] = useState<User | null>(null);
 
+  // Kiểm tra quyền Admin
   useEffect(() => {
-    const user = getCurrentUser()
+    const user = getCurrentUser();
     if (!user || !isAdmin()) {
-      router.push('/login')
-      return
+      router.push("/login");
+      return;
     }
+    fetchUsers();
+  }, [router]);
 
-    const userActivityData = getUserActivityData()
-    setUsers(userActivityData)
-    setFilteredUsers(userActivityData)
-    setLoading(false)
-  }, [router])
+  // Lấy danh sách users từ API
+  const fetchUsers = async () => {
+    try {
+      setLoading(true);
+      const token = getAccessToken(); // hoặc dùng getAccessToken() từ auth-store
 
+      const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/users/`, {
+        method: "GET",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+      });
+      if (!res.ok) {
+        throw new Error("Failed to fetch users");
+      }
+
+      const data = await res.json();
+
+      // Giả sử API trả về mảng users trực tiếp
+      const formattedUsers = data.data.map((user: any) => ({
+        userId: user.userId || user.id,
+        userName: user.userName || user.fullName || "N/A",
+        email: user.account.email,
+        lastActive: user.lastActive || user.updatedAt || new Date(),
+        workoutsSessions: user.workoutsSessions || 0,
+        currentProgram: user.currentProgram || null,
+      }));
+
+      setUsers(formattedUsers);
+      setFilteredUsers(formattedUsers);
+    } catch (error) {
+      console.error("Error fetching users:", error);
+      toast.error("Failed to load users. Please try again.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Tìm kiếm
   useEffect(() => {
     const filtered = users.filter(
       (user) =>
         user.userName.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        user.email.toLowerCase().includes(searchTerm.toLowerCase())
-    )
-    setFilteredUsers(filtered)
-  }, [searchTerm, users])
+        user.email.toLowerCase().includes(searchTerm.toLowerCase()),
+    );
+    setFilteredUsers(filtered);
+  }, [searchTerm, users]);
 
-  const handleDeleteUser = (userId: string) => {
-    if (confirm('Are you sure you want to delete this user?')) {
-      deleteUser(userId)
-      setUsers(users.filter((u) => u.userId !== userId))
+  const handleDeleteUser = async (userId: string) => {
+    if (!confirm("Are you sure you want to delete this user?")) return;
+
+    setDeletingId(userId);
+
+    try {
+      const token = getAccessToken();
+
+      const res = await fetch(
+        `${process.env.NEXT_PUBLIC_API_URL}/api/users/${userId}`,
+        {
+          method: "DELETE",
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+        },
+      );
+
+      if (!res.ok) {
+        throw new Error("Failed to delete user");
+      }
+
+      // Cập nhật UI sau khi xóa thành công
+      setUsers(users.filter((u) => u.userId !== userId));
+      setFilteredUsers(filteredUsers.filter((u) => u.userId !== userId));
+      toast.success("User deleted successfully");
+    } catch (error) {
+      toast.error("Failed to delete user");
+    } finally {
+      setDeletingId(null);
     }
-  }
+  };
 
   if (loading) {
     return (
       <div className="flex items-center justify-center min-h-screen">
-        <p className="text-muted-foreground">Loading...</p>
+        <div className="flex items-center gap-3">
+          <Loader2 className="w-6 h-6 animate-spin" />
+          <p className="text-muted-foreground">Loading users...</p>
+        </div>
       </div>
-    )
+    );
   }
 
   return (
@@ -80,7 +148,9 @@ export default function UsersManagement() {
         <div className="p-8">
           <div className="mb-8">
             <h1 className="text-3xl font-bold">Users Management</h1>
-            <p className="text-muted-foreground mt-2">Manage all users and their information</p>
+            <p className="text-muted-foreground mt-2">
+              Manage all users and their information
+            </p>
           </div>
 
           {/* Search Bar */}
@@ -93,7 +163,7 @@ export default function UsersManagement() {
                 onChange={(e) => setSearchTerm(e.target.value)}
                 className="flex-1"
               />
-              <p className="text-sm text-muted-foreground">
+              <p className="text-sm text-muted-foreground whitespace-nowrap">
                 {filteredUsers.length} users found
               </p>
             </div>
@@ -116,8 +186,12 @@ export default function UsersManagement() {
                 {filteredUsers.length > 0 ? (
                   filteredUsers.map((user) => (
                     <TableRow key={user.userId}>
-                      <TableCell className="font-semibold">{user.userName}</TableCell>
-                      <TableCell className="text-muted-foreground">{user.email}</TableCell>
+                      <TableCell className="font-semibold">
+                        {user.userName}
+                      </TableCell>
+                      <TableCell className="text-muted-foreground">
+                        {user.email}
+                      </TableCell>
                       <TableCell>{user.workoutsSessions}</TableCell>
                       <TableCell>
                         {user.currentProgram ? (
@@ -144,8 +218,13 @@ export default function UsersManagement() {
                             variant="destructive"
                             size="sm"
                             onClick={() => handleDeleteUser(user.userId)}
+                            disabled={deletingId === user.userId}
                           >
-                            <Trash2 className="w-4 h-4" />
+                            {deletingId === user.userId ? (
+                              <Loader2 className="w-4 h-4 animate-spin" />
+                            ) : (
+                              <Trash2 className="w-4 h-4" />
+                            )}
                           </Button>
                         </div>
                       </TableCell>
@@ -153,7 +232,10 @@ export default function UsersManagement() {
                   ))
                 ) : (
                   <TableRow>
-                    <TableCell colSpan={6} className="text-center py-8 text-muted-foreground">
+                    <TableCell
+                      colSpan={6}
+                      className="text-center py-8 text-muted-foreground"
+                    >
                       No users found
                     </TableCell>
                   </TableRow>
@@ -168,7 +250,9 @@ export default function UsersManagement() {
               <Card className="w-full max-w-md">
                 <div className="p-6">
                   <div className="flex items-center justify-between mb-4">
-                    <h2 className="text-2xl font-bold">{selectedUser.userName}</h2>
+                    <h2 className="text-2xl font-bold">
+                      {selectedUser.userName}
+                    </h2>
                     <Button
                       variant="ghost"
                       onClick={() => setSelectedUser(null)}
@@ -182,21 +266,26 @@ export default function UsersManagement() {
                       <p className="text-sm text-muted-foreground">Email</p>
                       <p className="font-semibold">{selectedUser.email}</p>
                     </div>
-
                     <div>
-                      <p className="text-sm text-muted-foreground">Workout Sessions</p>
-                      <p className="font-semibold">{selectedUser.workoutsSessions}</p>
-                    </div>
-
-                    <div>
-                      <p className="text-sm text-muted-foreground">Current Program</p>
+                      <p className="text-sm text-muted-foreground">
+                        Workout Sessions
+                      </p>
                       <p className="font-semibold">
-                        {selectedUser.currentProgram || 'No active program'}
+                        {selectedUser.workoutsSessions}
                       </p>
                     </div>
-
                     <div>
-                      <p className="text-sm text-muted-foreground">Last Active</p>
+                      <p className="text-sm text-muted-foreground">
+                        Current Program
+                      </p>
+                      <p className="font-semibold">
+                        {selectedUser.currentProgram || "No active program"}
+                      </p>
+                    </div>
+                    <div>
+                      <p className="text-sm text-muted-foreground">
+                        Last Active
+                      </p>
                       <p className="font-semibold">
                         {new Date(selectedUser.lastActive).toLocaleDateString()}
                       </p>
@@ -215,8 +304,8 @@ export default function UsersManagement() {
                       variant="destructive"
                       className="flex-1"
                       onClick={() => {
-                        handleDeleteUser(selectedUser.userId)
-                        setSelectedUser(null)
+                        handleDeleteUser(selectedUser.userId);
+                        setSelectedUser(null);
                       }}
                     >
                       Delete User
@@ -229,5 +318,5 @@ export default function UsersManagement() {
         </div>
       </main>
     </div>
-  )
+  );
 }

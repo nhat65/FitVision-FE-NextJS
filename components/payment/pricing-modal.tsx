@@ -11,12 +11,13 @@ import {
 import { Button } from '@/components/ui/button'
 import { Loader2, Check } from 'lucide-react'
 import { processPurchase } from '@/lib/subscription-store'
-import type { WorkoutProgram } from '@/lib/workout-data'
+import { Workout } from '@/app/workouts/page'
+
 
 interface PricingModalProps {
   open: boolean
   onOpenChange: (open: boolean) => void
-  program: WorkoutProgram
+  program: any
   userId: string
   onSuccess?: () => void
 }

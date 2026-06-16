@@ -1,38 +1,118 @@
 "use client"
 
-import React from "react"
-
-import { useState, useEffect } from "react"
+import React, { useState, useEffect } from "react"
 import { Header } from "@/components/layout/header"
 import { Footer } from "@/components/layout/footer"
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
-import { 
-  loadProgress, 
-  getWeeklyStats, 
-  getMonthlyProgress,
-  generateDemoData,
-  type UserProgress 
-} from "@/lib/progress-store"
 import {
   Flame,
   Clock,
   Target,
   TrendingUp,
   Calendar,
-  Award,
   Zap,
   ChevronRight,
 } from "lucide-react"
 import Link from "next/link"
+import { getAccessToken } from "@/lib/auth-store"
 
-function StatCard({ 
-  icon: Icon, 
-  label, 
-  value, 
+// ─── Types ────────────────────────────────────────────────────────────────────
+
+interface SummaryData {
+  totalWorkouts: number
+  totalMinutes: number
+  totalCalories: number
+  workoutsThisWeek: number
+}
+
+interface WeeklyStatItem {
+  day: string
+  workouts: number
+  calories: number
+}
+
+interface MonthlyStatItem {
+  week: string
+  minutes: number
+}
+
+interface SessionItem {
+  id: string
+  date: string
+  workoutId: string
+  workoutName: string
+  duration: number   // seconds
+  calories: number
+}
+
+// ─── API helpers ──────────────────────────────────────────────────────────────
+
+const BASE_URL = process.env.NEXT_PUBLIC_API_URL ?? ""
+
+/** Trả về ISO date string của ngày đầu tuần hiện tại (Monday), dạng YYYY-MM-DD */
+function getCurrentWeek(): string {
+  const now = new Date()
+  const day = now.getDay() // 0 = Sun
+  const diff = now.getDate() - day + (day === 0 ? -6 : 1) // về Monday
+  const monday = new Date(now.setDate(diff))
+  return monday.toISOString().split("T")[0] // "YYYY-MM-DD"
+}
+
+function authHeaders(): HeadersInit {
+  const token = getAccessToken()
+  return {
+    "Content-Type": "application/json",
+    Authorization: `Bearer ${token}`,
+  }
+}
+
+async function fetchSummary(): Promise<SummaryData> {
+  const res = await fetch(`${BASE_URL}/api/user-progress/summary`, {
+    headers: authHeaders(),
+  })
+  if (!res.ok) throw new Error("Failed to fetch summary")
+  const json = await res.json()
+  return json.data as SummaryData
+}
+
+async function fetchWeeklyStats(): Promise<WeeklyStatItem[]> {
+  const week = getCurrentWeek()
+  const res = await fetch(`${BASE_URL}/api/user-progress/weekly-stats?week=${week}`, {
+    headers: authHeaders(),
+  })
+  if (!res.ok) throw new Error("Failed to fetch weekly stats")
+  const json = await res.json()
+  return json.data as WeeklyStatItem[]
+}
+
+async function fetchMonthlyStats(): Promise<MonthlyStatItem[]> {
+  const res = await fetch(`${BASE_URL}/api/user-progress/monthly-stats`, {
+    headers: authHeaders(),
+  })
+  if (!res.ok) throw new Error("Failed to fetch monthly stats")
+  const json = await res.json()
+  return json.data as MonthlyStatItem[]
+}
+
+async function fetchRecentSessions(): Promise<SessionItem[]> {
+  const res = await fetch(`${BASE_URL}/api/user-progress/top-5-recent`, {
+    headers: authHeaders(),
+  })
+  if (!res.ok) throw new Error("Failed to fetch recent sessions")
+  const json = await res.json()
+  return json.data as SessionItem[]
+}
+
+// ─── Sub-components ───────────────────────────────────────────────────────────
+
+function StatCard({
+  icon: Icon,
+  label,
+  value,
   subtext,
-  iconColor = "text-primary"
-}: { 
+  iconColor = "text-primary",
+}: {
   icon: React.ElementType
   label: string
   value: string | number
@@ -59,26 +139,29 @@ function StatCard({
   )
 }
 
-function WeeklyChart({ data }: { data: { day: string; workouts: number; calories: number }[] }) {
-  const maxCalories = Math.max(...data.map(d => d.calories), 1)
-  
+function WeeklyChart({ data }: { data: WeeklyStatItem[] }) {
+  const maxCalories = Math.max(...data.map((d) => d.calories), 1)
+  const todayIndex = new Date().getDay()
+
   return (
     <div className="flex items-end justify-between gap-2 h-40">
       {data.map((item, index) => {
         const height = item.calories > 0 ? (item.calories / maxCalories) * 100 : 5
-        const isToday = index === new Date().getDay()
-        
+        const isToday = index === todayIndex
+
         return (
           <div key={item.day} className="flex-1 flex flex-col items-center gap-2">
-            <div 
+            <div
               className={`w-full rounded-t-md transition-all duration-300 ${
-                item.workouts > 0 
-                  ? "bg-primary" 
-                  : "bg-secondary"
+                item.workouts > 0 ? "bg-primary" : "bg-secondary"
               } ${isToday ? "ring-2 ring-primary ring-offset-2 ring-offset-background" : ""}`}
               style={{ height: `${height}%`, minHeight: "8px" }}
             />
-            <span className={`text-xs ${isToday ? "font-bold text-primary" : "text-muted-foreground"}`}>
+            <span
+              className={`text-xs ${
+                isToday ? "font-bold text-primary" : "text-muted-foreground"
+              }`}
+            >
               {item.day}
             </span>
           </div>
@@ -88,22 +171,22 @@ function WeeklyChart({ data }: { data: { day: string; workouts: number; calories
   )
 }
 
-function MonthlyChart({ data }: { data: { week: string; minutes: number }[] }) {
-  const maxMinutes = Math.max(...data.map(d => d.minutes), 1)
-  
+function MonthlyChart({ data }: { data: MonthlyStatItem[] }) {
+  const maxMinutes = Math.max(...data.map((d) => d.minutes), 1)
+
   return (
     <div className="space-y-3">
       {data.map((item) => {
         const width = item.minutes > 0 ? (item.minutes / maxMinutes) * 100 : 0
-        
+
         return (
           <div key={item.week} className="space-y-1">
             <div className="flex items-center justify-between text-sm">
               <span className="text-muted-foreground">{item.week}</span>
-              <span className="font-medium">{item.minutes} min</span>
+              <span className="font-medium">{Math.ceil(item.minutes / 60)} min</span>
             </div>
             <div className="w-full h-3 bg-secondary rounded-full overflow-hidden">
-              <div 
+              <div
                 className="h-full bg-primary rounded-full transition-all duration-500"
                 style={{ width: `${width}%` }}
               />
@@ -115,10 +198,8 @@ function MonthlyChart({ data }: { data: { week: string; minutes: number }[] }) {
   )
 }
 
-function RecentWorkouts({ sessions }: { sessions: UserProgress["sessions"] }) {
-  const recentSessions = sessions.slice(-5).reverse()
-  
-  if (recentSessions.length === 0) {
+function RecentWorkouts({ sessions }: { sessions: SessionItem[] }) {
+  if (sessions.length === 0) {
     return (
       <div className="text-center py-8">
         <p className="text-muted-foreground mb-4">No workouts yet</p>
@@ -128,19 +209,19 @@ function RecentWorkouts({ sessions }: { sessions: UserProgress["sessions"] }) {
       </div>
     )
   }
-  
+
   return (
     <div className="space-y-3">
-      {recentSessions.map((session) => {
+      {sessions.map((session) => {
         const date = new Date(session.date)
         const formattedDate = date.toLocaleDateString("en-US", {
           weekday: "short",
           day: "numeric",
           month: "short",
         })
-        
+
         return (
-          <div 
+          <div
             key={session.id}
             className="flex items-center justify-between p-4 rounded-lg bg-secondary"
           >
@@ -164,23 +245,42 @@ function RecentWorkouts({ sessions }: { sessions: UserProgress["sessions"] }) {
   )
 }
 
+// ─── Page ─────────────────────────────────────────────────────────────────────
+
 export default function ProgressPage() {
-  const [progress, setProgress] = useState<UserProgress | null>(null)
-  const [isDemo, setIsDemo] = useState(false)
+  const [summary, setSummary] = useState<SummaryData | null>(null)
+  const [weeklyStats, setWeeklyStats] = useState<WeeklyStatItem[]>([])
+  const [monthlyStats, setMonthlyStats] = useState<MonthlyStatItem[]>([])
+  const [sessions, setSessions] = useState<SessionItem[]>([])
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
-    const loadedProgress = loadProgress()
-    // If no real data, show demo data
-    if (loadedProgress.totalWorkouts === 0) {
-      setProgress(generateDemoData())
-      setIsDemo(true)
-    } else {
-      setProgress(loadedProgress)
-      setIsDemo(false)
+    async function loadAll() {
+      try {
+        setLoading(true)
+        const [summaryRes, weeklyRes, monthlyRes, sessionsRes] = await Promise.all([
+          fetchSummary(),
+          fetchWeeklyStats(),
+          fetchMonthlyStats(),
+          fetchRecentSessions(),
+        ])
+        setSummary(summaryRes)
+        setWeeklyStats(weeklyRes)
+        setMonthlyStats(monthlyRes)
+        setSessions(sessionsRes)
+      } catch (err) {
+        console.error(err)
+        setError("Failed to load progress data. Please try again.")
+      } finally {
+        setLoading(false)
+      }
     }
+
+    loadAll()
   }, [])
 
-  if (!progress) {
+  if (loading) {
     return (
       <div className="min-h-screen flex items-center justify-center">
         <div className="animate-pulse text-muted-foreground">Loading...</div>
@@ -188,15 +288,25 @@ export default function ProgressPage() {
     )
   }
 
-  const weeklyStats = getWeeklyStats(progress)
-  const monthlyProgress = getMonthlyProgress(progress)
-  const goalProgress = Math.min((progress.workoutsThisWeek / progress.weeklyGoal) * 100, 100)
+  if (error || !summary) {
+    return (
+      <div className="min-h-screen flex items-center justify-center">
+        <p className="text-destructive">{error ?? "Something went wrong."}</p>
+      </div>
+    )
+  }
+
+  const goalProgress = Math.min(
+    (summary.workoutsThisWeek / 5) * 100, // weeklyGoal mặc định 5, điều chỉnh nếu BE trả về
+    100
+  )
 
   return (
     <div className="min-h-screen flex flex-col">
       <Header />
       <main className="flex-1 pt-24 pb-16">
         <div className="mx-auto max-w-7xl px-6 lg:px-8">
+
           {/* Page header */}
           <div className="mb-8">
             <h1 className="text-3xl font-bold tracking-tight sm:text-4xl">
@@ -205,47 +315,41 @@ export default function ProgressPage() {
             <p className="mt-2 text-muted-foreground">
               Track your fitness journey and achieve your goals
             </p>
-            {isDemo && (
-              <div className="mt-4 p-4 rounded-lg bg-primary/10 border border-primary/20">
-                <p className="text-sm text-primary">
-                  This is demo data. Start training to track your real progress!
-                </p>
-              </div>
-            )}
           </div>
 
           {/* Stats grid */}
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
-            <StatCard 
+            <StatCard
               icon={Target}
               label="Total Workouts"
-              value={progress.totalWorkouts}
+              value={summary.totalWorkouts}
               subtext="sessions"
             />
-            <StatCard 
+            <StatCard
               icon={Clock}
               label="Training Time"
-              value={progress.totalMinutes}
+              value={summary.totalMinutes}
               subtext="minutes"
               iconColor="text-blue-500"
             />
-            <StatCard 
+            <StatCard
               icon={Flame}
               label="Calories Burned"
-              value={progress.totalCalories.toLocaleString()}
+              value={summary.totalCalories.toLocaleString()}
               subtext="kcal"
               iconColor="text-orange-500"
             />
-            <StatCard 
+            <StatCard
               icon={TrendingUp}
-              label="Current Streak"
-              value={progress.currentStreak}
-              subtext={`Best: ${progress.longestStreak} days`}
+              label="This Week"
+              value={summary.workoutsThisWeek}
+              subtext="workouts"
               iconColor="text-green-500"
             />
           </div>
 
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+
             {/* Weekly goal */}
             <Card className="lg:col-span-2">
               <CardHeader>
@@ -254,7 +358,7 @@ export default function ProgressPage() {
                   Weekly Goal
                 </CardTitle>
                 <CardDescription>
-                  {progress.workoutsThisWeek} / {progress.weeklyGoal} workouts
+                  {summary.workoutsThisWeek} / 5 workouts
                 </CardDescription>
               </CardHeader>
               <CardContent>
@@ -264,83 +368,13 @@ export default function ProgressPage() {
                     <span className="font-medium">{Math.round(goalProgress)}%</span>
                   </div>
                   <div className="w-full h-4 bg-secondary rounded-full overflow-hidden">
-                    <div 
+                    <div
                       className="h-full bg-primary rounded-full transition-all duration-500"
                       style={{ width: `${goalProgress}%` }}
                     />
                   </div>
                 </div>
-                
                 <WeeklyChart data={weeklyStats} />
-              </CardContent>
-            </Card>
-
-            {/* Achievements */}
-            <Card>
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2">
-                  <Award className="w-5 h-5" />
-                  Achievements
-                </CardTitle>
-              </CardHeader>
-              <CardContent>
-                <div className="space-y-4">
-                  <div className={`flex items-center gap-3 p-3 rounded-lg ${
-                    progress.totalWorkouts >= 1 ? "bg-primary/10" : "bg-secondary"
-                  }`}>
-                    <div className={`p-2 rounded-full ${
-                      progress.totalWorkouts >= 1 ? "bg-primary text-primary-foreground" : "bg-muted"
-                    }`}>
-                      <Zap className="w-4 h-4" />
-                    </div>
-                    <div>
-                      <p className="font-medium text-sm">First Workout</p>
-                      <p className="text-xs text-muted-foreground">Complete 1 workout</p>
-                    </div>
-                  </div>
-
-                  <div className={`flex items-center gap-3 p-3 rounded-lg ${
-                    progress.currentStreak >= 3 ? "bg-primary/10" : "bg-secondary"
-                  }`}>
-                    <div className={`p-2 rounded-full ${
-                      progress.currentStreak >= 3 ? "bg-primary text-primary-foreground" : "bg-muted"
-                    }`}>
-                      <TrendingUp className="w-4 h-4" />
-                    </div>
-                    <div>
-                      <p className="font-medium text-sm">3 Day Streak</p>
-                      <p className="text-xs text-muted-foreground">Maintain a 3-day streak</p>
-                    </div>
-                  </div>
-
-                  <div className={`flex items-center gap-3 p-3 rounded-lg ${
-                    progress.totalCalories >= 1000 ? "bg-primary/10" : "bg-secondary"
-                  }`}>
-                    <div className={`p-2 rounded-full ${
-                      progress.totalCalories >= 1000 ? "bg-primary text-primary-foreground" : "bg-muted"
-                    }`}>
-                      <Flame className="w-4 h-4" />
-                    </div>
-                    <div>
-                      <p className="font-medium text-sm">Burn 1000 Calories</p>
-                      <p className="text-xs text-muted-foreground">Total 1000 kcal burned</p>
-                    </div>
-                  </div>
-
-                  <div className={`flex items-center gap-3 p-3 rounded-lg ${
-                    progress.currentStreak >= 7 ? "bg-primary/10" : "bg-secondary"
-                  }`}>
-                    <div className={`p-2 rounded-full ${
-                      progress.currentStreak >= 7 ? "bg-primary text-primary-foreground" : "bg-muted"
-                    }`}>
-                      <Award className="w-4 h-4" />
-                    </div>
-                    <div>
-                      <p className="font-medium text-sm">7 Day Warrior</p>
-                      <p className="text-xs text-muted-foreground">7 consecutive day streak</p>
-                    </div>
-                  </div>
-                </div>
               </CardContent>
             </Card>
 
@@ -351,16 +385,16 @@ export default function ProgressPage() {
                 <CardDescription>Training time in the last 4 weeks</CardDescription>
               </CardHeader>
               <CardContent>
-                <MonthlyChart data={monthlyProgress} />
+                <MonthlyChart data={monthlyStats} />
               </CardContent>
             </Card>
 
             {/* Recent workouts */}
-            <Card className="lg:col-span-2">
+            <Card className="lg:col-span-3">
               <CardHeader className="flex flex-row items-center justify-between">
                 <div>
                   <CardTitle>Recent Workouts</CardTitle>
-                  <CardDescription>Your training history</CardDescription>
+                  <CardDescription>Your last 5 training sessions</CardDescription>
                 </div>
                 <Button variant="ghost" size="sm" asChild>
                   <Link href="/workouts">
@@ -370,9 +404,10 @@ export default function ProgressPage() {
                 </Button>
               </CardHeader>
               <CardContent>
-                <RecentWorkouts sessions={progress.sessions} />
+                <RecentWorkouts sessions={sessions} />
               </CardContent>
             </Card>
+
           </div>
         </div>
       </main>

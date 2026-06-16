@@ -7,9 +7,7 @@ import { AdminSidebar } from '@/components/admin/admin-sidebar'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
-import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
-import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import {
   Table,
   TableBody,
@@ -18,15 +16,21 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table'
-import { workoutPrograms } from '@/lib/workout-data'
-import {
-  getProgramPricing,
-  getAllPricings,
-  setProgramPricing,
-  type ProgramPricing,
-} from '@/lib/subscription-store'
-import { isAdmin } from '@/lib/user-store'
-import { DollarSign, Plus, Edit, Save, X } from 'lucide-react'
+import { getAccessToken } from '@/lib/auth-store'
+import { isAdmin, getCurrentUser } from '@/lib/user-store'
+import { DollarSign, Edit, Save, X, Loader2 } from 'lucide-react'
+import { toast } from 'sonner'
+
+interface ProgramPricing {
+  id: string
+  name: string
+  difficulty: string
+  totalDays: number
+  durationWeeks: number
+  isPremium: boolean
+  price: number
+  aiMonitoringFee: number
+}
 
 export default function AdminPricingPage() {
   const router = useRouter()
@@ -34,59 +38,107 @@ export default function AdminPricingPage() {
   const [editingId, setEditingId] = useState<string | null>(null)
   const [formData, setFormData] = useState<Partial<ProgramPricing>>({})
   const [loading, setLoading] = useState(true)
+  const [savingId, setSavingId] = useState<string | null>(null)
 
+  // Kiểm tra quyền admin và fetch data
   useEffect(() => {
-    // Check admin access
-    if (!isAdmin()) {
+    const user = getCurrentUser()
+    if (!user || !isAdmin()) {
       router.push('/login')
       return
     }
 
-    // Load pricings
-    const allPricings = getAllPricings()
-    
-    // Add default pricing for programs without pricing
-    const enrichedPricings = workoutPrograms.map((program) => {
-      const existing = allPricings.find((p) => p.programId === program.id)
-      return (
-        existing || {
-          programId: program.id,
-          isPremium: false,
-          price: 0,
-          aiMonitoringFee: 9.99,
-        }
-      )
-    })
-
-    setPricings(enrichedPricings)
-    setLoading(false)
+    fetchPricings()
   }, [router])
 
+  // Fetch tất cả pricing từ API
+  const fetchPricings = async () => {
+    try {
+      setLoading(true)
+      const token = getAccessToken()
+
+      const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/workout-plan/pricing`, {
+        method: 'GET',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+      })
+
+      if (!response.ok) {
+        throw new Error('Failed to fetch pricing data')
+      }
+
+      const data = await response.json()
+      setPricings(data.data || [])
+    } catch (error) {
+      console.error('Error fetching pricings:', error)
+      toast.error('Failed to load pricing data')
+    } finally {
+      setLoading(false)
+    }
+  }
+
   const handleEdit = (pricing: ProgramPricing) => {
-    setEditingId(pricing.programId)
+    setEditingId(pricing.id)
     setFormData({ ...pricing })
   }
 
-  const handleSave = () => {
-    if (editingId && formData.programId) {
-      const updatedPricing: ProgramPricing = {
-        programId: formData.programId,
+  const handleSave = async (programId: string) => {
+    if (!formData.id) return
+
+    setSavingId(programId)
+
+    try {
+      const token = getAccessToken()
+      const updatedPricing = {
         isPremium: formData.isPremium ?? false,
         price: formData.price ?? 0,
         aiMonitoringFee: formData.aiMonitoringFee ?? 9.99,
       }
 
-      setProgramPricing(updatedPricing)
+      const response = await fetch(
+        `${process.env.NEXT_PUBLIC_API_URL}/api/workout-plan/${programId}/pricing`,
+        {
+          method: 'PUT',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${token}`,
+          },
+          body: JSON.stringify(updatedPricing),
+        }
+      )
+
+      if (!response.ok) {
+        const error = await response.json()
+        throw new Error(error.message || 'Failed to save pricing')
+      }
+
+      const result = await response.json()
+      const savedPricing = result.data
 
       // Update local state
       setPricings((prev) =>
         prev.map((p) =>
-          p.programId === editingId ? updatedPricing : p
+          p.id === programId
+            ? {
+                ...p,
+                isPremium: savedPricing.isPremium,
+                price: savedPricing.price,
+                aiMonitoringFee: savedPricing.aiMonitoringFee,
+              }
+            : p
         )
       )
 
+      toast.success('Pricing updated successfully')
       setEditingId(null)
       setFormData({})
+    } catch (error: any) {
+      console.error('Error saving pricing:', error)
+      toast.error(error.message || 'Failed to save pricing')
+    } finally {
+      setSavingId(null)
     }
   }
 
@@ -95,16 +147,18 @@ export default function AdminPricingPage() {
     setFormData({})
   }
 
-  const getProgram = (programId: string) => {
-    return workoutPrograms.find((p) => p.id === programId)
-  }
-
   if (loading) {
     return (
       <div className="min-h-screen flex">
         <AdminSidebar />
-        <div className="flex-1 flex items-center justify-center">
-          <p>Loading...</p>
+        <div className="flex-1 flex flex-col">
+          <Header />
+          <div className="flex-1 flex items-center justify-center">
+            <div className="flex items-center gap-3">
+              <Loader2 className="w-6 h-6 animate-spin" />
+              <p>Loading pricing data...</p>
+            </div>
+          </div>
         </div>
       </div>
     )
@@ -140,6 +194,7 @@ export default function AdminPricingPage() {
                       <TableRow>
                         <TableHead>Program Name</TableHead>
                         <TableHead>Difficulty</TableHead>
+                        <TableHead>Duration</TableHead>
                         <TableHead>Premium</TableHead>
                         <TableHead>Price</TableHead>
                         <TableHead>AI Fee/Month</TableHead>
@@ -147,116 +202,140 @@ export default function AdminPricingPage() {
                       </TableRow>
                     </TableHeader>
                     <TableBody>
-                      {pricings.map((pricing) => {
-                        const program = getProgram(pricing.programId)
-                        const isEditing = editingId === pricing.programId
+                      {pricings.length === 0 ? (
+                        <TableRow>
+                          <TableCell colSpan={7} className="text-center py-8 text-muted-foreground">
+                            No pricing data found
+                          </TableCell>
+                        </TableRow>
+                      ) : (
+                        pricings.map((pricing) => {
+                          const isEditing = editingId === pricing.id
+                          const isSaving = savingId === pricing.id
 
-                        return (
-                          <TableRow key={pricing.programId}>
-                            <TableCell className="font-medium">
-                              {program?.name || 'Unknown'}
-                            </TableCell>
-                            <TableCell>
-                              <span className="capitalize">
-                                {program?.difficulty}
-                              </span>
-                            </TableCell>
-                            <TableCell>
-                              {isEditing ? (
-                                <Select
-                                  value={formData.isPremium ? 'true' : 'false'}
-                                  onValueChange={(value) =>
-                                    setFormData({
-                                      ...formData,
-                                      isPremium: value === 'true',
-                                    })
-                                  }
-                                >
-                                  <SelectTrigger className="w-20">
-                                    <SelectValue />
-                                  </SelectTrigger>
-                                  <SelectContent>
-                                    <SelectItem value="false">Free</SelectItem>
-                                    <SelectItem value="true">Premium</SelectItem>
-                                  </SelectContent>
-                                </Select>
-                              ) : (
-                                <span>
-                                  {pricing.isPremium ? 'Premium' : 'Free'}
+                          return (
+                            <TableRow key={pricing.id}>
+                              <TableCell className="font-medium">
+                                {pricing.name}
+                              </TableCell>
+                              <TableCell>
+                                <span className="capitalize">
+                                  {pricing.difficulty || 'N/A'}
                                 </span>
-                              )}
-                            </TableCell>
-                            <TableCell>
-                              {isEditing ? (
-                                <Input
-                                  type="number"
-                                  min="0"
-                                  step="0.01"
-                                  value={formData.price ?? 0}
-                                  onChange={(e) =>
-                                    setFormData({
-                                      ...formData,
-                                      price: parseFloat(e.target.value),
-                                    })
-                                  }
-                                  className="w-24"
-                                />
-                              ) : (
-                                `$${pricing.price.toFixed(2)}`
-                              )}
-                            </TableCell>
-                            <TableCell>
-                              {isEditing ? (
-                                <Input
-                                  type="number"
-                                  min="0"
-                                  step="0.01"
-                                  value={formData.aiMonitoringFee ?? 9.99}
-                                  onChange={(e) =>
-                                    setFormData({
-                                      ...formData,
-                                      aiMonitoringFee: parseFloat(e.target.value),
-                                    })
-                                  }
-                                  className="w-24"
-                                />
-                              ) : (
-                                `$${pricing.aiMonitoringFee.toFixed(2)}`
-                              )}
-                            </TableCell>
-                            <TableCell className="text-right">
-                              <div className="flex gap-2 justify-end">
+                              </TableCell>
+                              <TableCell>
+                                {pricing.totalDays || 'N/A'} days
+                                {pricing.durationWeeks && ` (${pricing.durationWeeks} weeks)`}
+                              </TableCell>
+                              <TableCell>
                                 {isEditing ? (
-                                  <>
-                                    <Button
-                                      size="sm"
-                                      onClick={handleSave}
-                                      className="bg-green-600 hover:bg-green-700"
-                                    >
-                                      <Save className="w-4 h-4" />
-                                    </Button>
-                                    <Button
-                                      size="sm"
-                                      variant="destructive"
-                                      onClick={handleCancel}
-                                    >
-                                      <X className="w-4 h-4" />
-                                    </Button>
-                                  </>
-                                ) : (
-                                  <Button
-                                    size="sm"
-                                    variant="outline"
-                                    onClick={() => handleEdit(pricing)}
+                                  <Select
+                                    value={formData.isPremium ? 'true' : 'false'}
+                                    onValueChange={(value) =>
+                                      setFormData({
+                                        ...formData,
+                                        isPremium: value === 'true',
+                                        price: value === 'false' ? 0 : formData.price,
+                                      })
+                                    }
                                   >
-                                    <Edit className="w-4 h-4" />
-                                  </Button>
+                                    <SelectTrigger className="w-24">
+                                      <SelectValue />
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                      <SelectItem value="false">Free</SelectItem>
+                                      <SelectItem value="true">Premium</SelectItem>
+                                    </SelectContent>
+                                  </Select>
+                                ) : (
+                                  <span className={`px-2 py-1 rounded-md text-xs font-medium ${
+                                    pricing.isPremium 
+                                      ? 'bg-yellow-100 text-yellow-700 dark:bg-yellow-900 dark:text-yellow-300' 
+                                      : 'bg-green-100 text-green-700 dark:bg-green-900 dark:text-green-300'
+                                  }`}>
+                                    {pricing.isPremium ? 'Premium' : 'Free'}
+                                  </span>
                                 )}
-                              </div>
-                            </TableCell>
-                          </TableRow>
-                        )
-                      })}
+                              </TableCell>
+                              <TableCell>
+                                {isEditing ? (
+                                  <Input
+                                    type="number"
+                                    min="0"
+                                    step="0.01"
+                                    value={formData.price ?? 0}
+                                    onChange={(e) =>
+                                      setFormData({
+                                        ...formData,
+                                        price: parseFloat(e.target.value),
+                                      })
+                                    }
+                                    className="w-24"
+                                    disabled={!formData.isPremium}
+                                  />
+                                ) : (
+                                  pricing.isPremium ? `$${pricing.price}` : 'Free'
+                                )}
+                              </TableCell>
+                              <TableCell>
+                                {isEditing ? (
+                                  <Input
+                                    type="number"
+                                    min="0"
+                                    step="0.01"
+                                    value={formData.aiMonitoringFee}
+                                    onChange={(e) =>
+                                      setFormData({
+                                        ...formData,
+                                        aiMonitoringFee: parseFloat(e.target.value),
+                                      })
+                                    }
+                                    className="w-24"
+                                  />
+                                ) : (
+                                  `$${pricing.aiMonitoringFee ?? 0}`
+                                )}
+                              </TableCell>
+                              <TableCell className="text-right">
+                                <div className="flex gap-2 justify-end">
+                                  {isEditing ? (
+                                    <>
+                                      <Button
+                                        size="sm"
+                                        onClick={() => handleSave(pricing.id)}
+                                        className="bg-green-600 hover:bg-green-700"
+                                        disabled={isSaving}
+                                      >
+                                        {isSaving ? (
+                                          <Loader2 className="w-4 h-4 animate-spin" />
+                                        ) : (
+                                          <Save className="w-4 h-4" />
+                                        )}
+                                      </Button>
+                                      <Button
+                                        size="sm"
+                                        variant="destructive"
+                                        onClick={handleCancel}
+                                        disabled={isSaving}
+                                      >
+                                        <X className="w-4 h-4" />
+                                      </Button>
+                                    </>
+                                  ) : (
+                                    <Button
+                                      size="sm"
+                                      variant="outline"
+                                      onClick={() => handleEdit(pricing)}
+                                    >
+                                      <Edit className="w-4 h-4" />
+                                    </Button>
+                                  )}
+                                </div>
+                              </TableCell>
+                            </TableRow>
+                          )
+                        })
+                      )}
                     </TableBody>
                   </Table>
                 </div>

@@ -31,7 +31,7 @@ export function saveTokens(tokens: TokenResponse) {
   localStorage.setItem(ACCESS_TOKEN_KEY, tokens.accessToken)
   localStorage.setItem(REFRESH_TOKEN_KEY, tokens.refreshToken)
   localStorage.setItem(USER_KEY, JSON.stringify(tokens.user))
-  console.log(tokens.user)
+  console.log(tokens)
 }
 
 // Clear tokens
