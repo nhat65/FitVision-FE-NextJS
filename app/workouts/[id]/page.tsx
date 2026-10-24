@@ -351,7 +351,6 @@ export default function WorkoutDetailPage({ params }: WorkoutDetailPageProps) {
               },
             },
           );
-          console.log(completedRes);
           if (completedRes.ok) {
             const completedData = await completedRes.json();
             const days = completedData.data?.[0]?.completedDays || [];

@@ -6,6 +6,16 @@ import { Input } from "@/components/ui/input"
 import { Card } from "@/components/ui/card"
 import { MessageCircle, X, Send, Loader2 } from "lucide-react"
 
+const scrollbarHideStyles = `
+  .chatbot-messages::-webkit-scrollbar {
+    display: none;
+  }
+  .chatbot-messages {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+`
+
 interface Message {
   id: string
   text: string
@@ -19,6 +29,17 @@ export function ChatBot() {
   const [input, setInput] = useState("")
   const [isLoading, setIsLoading] = useState(false)
   const messagesEndRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    // Inject scrollbar hiding styles
+    const style = document.createElement("style")
+    style.textContent = scrollbarHideStyles
+    document.head.appendChild(style)
+
+    return () => {
+      document.head.removeChild(style)
+    }
+  }, [])
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" })
@@ -117,7 +138,7 @@ export function ChatBot() {
           </div>
 
           {/* Messages */}
-          <div className="flex-1 overflow-y-auto p-4 space-y-3">
+          <div className="chatbot-messages flex-1 overflow-y-auto p-4 space-y-3">
             {messages.length === 0 && (
               <div className="flex items-center justify-center h-full">
                 <div className="text-center">

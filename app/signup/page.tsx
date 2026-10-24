@@ -21,7 +21,7 @@ export default function SignupPage() {
     setError('');
 
     if (password !== confirmPassword) {
-      setError('Mật khẩu xác nhận không khớp');
+      setError('Passwords do not match');
       return;
     }
 
@@ -31,16 +31,16 @@ export default function SignupPage() {
       const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/auth/register`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email, password }),
+        body: JSON.stringify({ email, password, confirmPassword }),
       });
 
       const data = await res.json();
 
       if (!res.ok) {
-        throw new Error(data.message || 'Đăng ký thất bại');
+        throw new Error(data.message || 'Registration failed');
       }
 
-      // Sau khi đăng ký thành công → chuyển sang trang login
+      // After successful registration → redirect to login page
       router.push('/login?message=signup-success');
     } catch (err: any) {
       setError(err.message);
@@ -53,7 +53,7 @@ export default function SignupPage() {
     <div className="min-h-screen flex items-center justify-center bg-background">
       <Card className="w-full max-w-md">
         <CardHeader>
-          <CardTitle className="text-2xl text-center">Tạo tài khoản</CardTitle>
+          <CardTitle className="text-2xl text-center">Create Account</CardTitle>
         </CardHeader>
         <CardContent>
           <form onSubmit={handleSignup} className="space-y-4">
@@ -69,7 +69,7 @@ export default function SignupPage() {
             <div>
               <Input
                 type="password"
-                placeholder="Mật khẩu"
+                placeholder="Password"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 required
@@ -78,7 +78,7 @@ export default function SignupPage() {
             <div>
               <Input
                 type="password"
-                placeholder="Xác nhận mật khẩu"
+                placeholder="Confirm Password"
                 value={confirmPassword}
                 onChange={(e) => setConfirmPassword(e.target.value)}
                 required
@@ -88,14 +88,14 @@ export default function SignupPage() {
             {error && <p className="text-destructive text-sm">{error}</p>}
 
             <Button type="submit" className="w-full" disabled={loading}>
-              {loading ? 'Đang tạo tài khoản...' : 'Đăng ký'}
+              {loading ? 'Creating account...' : 'Sign Up'}
             </Button>
           </form>
 
           <p className="text-center text-sm text-muted-foreground mt-6">
-            Đã có tài khoản?{' '}
+            Already have an account?{' '}
             <Link href="/login" className="text-primary hover:underline">
-              Đăng nhập
+              Sign In
             </Link>
           </p>
         </CardContent>

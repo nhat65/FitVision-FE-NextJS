@@ -19,7 +19,6 @@ const navigation = [
   { name: "Home", href: "/" },
   { name: "Workouts", href: "/workouts" },
   { name: "My Programs", href: "/my-programs" },
-  { name: "AI Coach", href: "/ai-coach" },
   { name: "Progress", href: "/progress" },
 ]
 
@@ -55,8 +54,8 @@ export function Header() {
   }
 
   return (
-    <header className="fixed top-0 left-0 right-0 z-50 bg-background/80 backdrop-blur-lg border-b border-border">
-      <nav className="mx-auto flex max-w-7xl items-center justify-between px-6 py-4 lg:px-8">
+    <header className="fixed top-0 left-0 right-0 z-50 bg-background/80 backdrop-blur-lg border-b border-border overflow-visible">
+      <nav className="mx-auto flex max-w-7xl items-center justify-between px-6 py-4 lg:px-8 overflow-visible">
         <div className="flex lg:flex-1">
           <Link href="/" className="flex items-center gap-2 -m-1.5 p-1.5">
             <div className="flex items-center justify-center w-10 h-10 rounded-lg bg-primary">
@@ -102,7 +101,7 @@ export function Header() {
                   <span className="max-w-32 truncate">{user.name}</span>
                 </Button>
               </DropdownMenuTrigger>
-              <DropdownMenuContent align="end" className="w-56">
+              <DropdownMenuContent align="end" sideOffset={12} className="w-56 z-[9999] mt-2">
                 <div className="px-2 py-1.5">
                   <p className="text-sm font-medium">{user.name}</p>
                   <p className="text-xs text-muted-foreground">{user.email}</p>

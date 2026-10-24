@@ -373,7 +373,8 @@ function AICoachContent() {
   const noCamera = searchParams.get("mode") === "no-camera";
 
   const user = getCurrentUser();
-  const hasAIMonitoring = user?.aiMonitoring;
+  const [hasAIMonitoring, setHasAIMonitoring] = useState<boolean | null>(null);
+  const [checkingSubscription, setCheckingSubscription] = useState(true);
   const workout = workoutId
     ? workoutPrograms.find((w) => w.id === workoutId)
     : null;
@@ -406,6 +407,39 @@ function AICoachContent() {
   const restActiveRef = useRef(false);        // true during rest — blocks AI rep counting
   const selectedExerciseRef = useRef<Exercise | null>(selectedExercise);
 
+  useEffect(() => {
+    const checkAIMonitoring = async () => {
+      if (!user) {
+        setHasAIMonitoring(false);
+        setCheckingSubscription(false);
+        return;
+      }
+
+      try {
+        const token = getAccessToken();
+        const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/subscription/check-validity`, {
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+        });
+
+        if (!res.ok) {
+          setHasAIMonitoring(false);
+        } else {
+          const result = await res.json();
+          console.log(result)
+          setHasAIMonitoring(result.data?.isValid === true);
+        }
+      } catch (error) {
+        console.error("Failed to check AI subscription:", error);
+        setHasAIMonitoring(false);
+      } finally {
+        setCheckingSubscription(false);
+      }
+    };
+
+    checkAIMonitoring();
+  }, [user]);
   // Sync refs
   useEffect(() => { isWorkoutActiveRef.current = isWorkoutActive; }, [isWorkoutActive]);
   useEffect(() => { isPausedRef.current = isPaused; }, [isPaused]);
@@ -722,6 +756,20 @@ function AICoachContent() {
   const exType = selectedExercise ? detectExerciseType(selectedExercise.name) : "unknown";
   const exCfg = EXERCISE_CONFIG[exType];
 
+
+  if (checkingSubscription) {
+    return (
+      <div className="min-h-screen flex flex-col">
+        <Header />
+        <main className="flex-1 pt-24 flex items-center justify-center">
+          <div className="text-center">
+            <div className="inline-block animate-spin rounded-full h-12 w-12 border-b-2 border-primary mb-4"></div>
+            <p className="text-muted-foreground">Checking AI Coach access...</p>
+          </div>
+        </main>
+      </div>
+    );
+  }
   // Paywall
   if (!hasAIMonitoring && !noCamera) {
     return (

@@ -34,6 +34,7 @@ import { toast } from "@/components/ui/use-toast";
 import { getAccessToken } from "@/lib/auth-store";
 import { toastSuccess } from "@/lib/toast-utils";
 import { EditExerciseModal } from "./edit-exercise-modal";
+import { uploadVideoToCloudinary } from "@/lib/uploadVideo"; // hàm đã viết ở bước trước
 
 interface ExerciseStat {
   exerciseId: string;
@@ -42,7 +43,7 @@ interface ExerciseStat {
   muscleGroup: string;
   difficulty: string;
   instructions: string;
-  videoDemoUrl?: string; // URL trả về từ server sau khi upload
+  videoUrl?: string; // URL trả về từ server sau khi upload
 }
 
 interface ApiExercise {
@@ -52,7 +53,7 @@ interface ApiExercise {
   muscleGroup: string;
   difficulty: string;
   instructions: string;
-  videoDemoUrl?: string;
+  videoUrl?: string;
 }
 
 export default function ExercisesManagement() {
@@ -70,6 +71,7 @@ export default function ExercisesManagement() {
   const [apiError, setApiError] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
   const videoInputRef = useRef<HTMLInputElement>(null);
+  const [uploadProgress, setUploadProgress] = useState(0);
 
   // State cho form thêm exercise với video file
   const [newExercise, setNewExercise] = useState({
@@ -82,7 +84,9 @@ export default function ExercisesManagement() {
     videoPreviewUrl: "" as string, // Để preview video trước khi upload
   });
 
-  const [editingExercise, setEditingExercise] = useState<ExerciseStat | null>(null);
+  const [editingExercise, setEditingExercise] = useState<ExerciseStat | null>(
+    null,
+  );
 
   // Hàm fetch exercises từ API
   const fetchExercisesFromAPI = async () => {
@@ -115,7 +119,7 @@ export default function ExercisesManagement() {
           muscleGroup: exercise.muscleGroup || "General",
           difficulty: exercise.difficulty || "intermediate",
           instructions: exercise.instructions || "",
-          videoDemoUrl: exercise.videoDemoUrl || "",
+          videoUrl: exercise.videoUrl || "",
         }),
       );
 
@@ -150,7 +154,7 @@ export default function ExercisesManagement() {
     }
   };
 
-  // Hàm thêm exercise qua API với video file upload
+  // Hàm thêm exercise: upload video thẳng lên Cloudinary, sau đó gửi metadata + data exercise về API
   const addExerciseViaAPI = async (exerciseData: {
     name: string;
     description: string;
@@ -163,26 +167,45 @@ export default function ExercisesManagement() {
       setUploading(true);
       const token = getAccessToken();
 
-      // Tạo FormData object
-      const formData = new FormData();
-      formData.append("name", exerciseData.name);
-      formData.append("description", exerciseData.description);
-      formData.append("muscleGroup", exerciseData.muscleGroup);
-      formData.append("difficulty", exerciseData.difficulty);
-      formData.append("instructions", exerciseData.instructions);
+      let videoData: {
+        url: string;
+        publicId: string;
+        duration: number;
+        format: string;
+        bytes: number;
+      } | null = null;
 
+      // Bước 1: upload video thẳng lên Cloudinary (nếu có), có progress riêng
       if (exerciseData.videoFile) {
-        formData.append("video", exerciseData.videoFile); // Field name 'video' cho backend
+        videoData = await uploadVideoToCloudinary(
+          exerciseData.videoFile,
+          (percent) => {
+            setUploadProgress(percent); // state progress, tạo thêm nếu chưa có
+          },
+        );
       }
 
+      // Bước 2: gửi data exercise + metadata video (JSON, không còn dùng FormData)
       const response = await fetch(
         `${process.env.NEXT_PUBLIC_API_URL}/api/exercises/`,
         {
           method: "POST",
           headers: {
+            "Content-Type": "application/json",
             Authorization: `Bearer ${token}`,
           },
-          body: formData,
+          body: JSON.stringify({
+            name: exerciseData.name,
+            description: exerciseData.description,
+            muscleGroup: exerciseData.muscleGroup,
+            difficulty: exerciseData.difficulty,
+            instructions: exerciseData.instructions,
+            ...(videoData && {
+              videoUrl: videoData.url,
+              videoPublicId: videoData.publicId,
+              videoDuration: videoData.duration,
+            }),
+          }),
         },
       );
 
@@ -216,6 +239,7 @@ export default function ExercisesManagement() {
       throw error;
     } finally {
       setUploading(false);
+      setUploadProgress(0);
     }
   };
 
@@ -937,14 +961,14 @@ export default function ExercisesManagement() {
                     </div>
 
                     {/* Video Demo from URL */}
-                    {selectedExercise.videoDemoUrl && (
+                    {selectedExercise.videoUrl && (
                       <div>
                         <p className="text-sm text-muted-foreground font-medium mb-2">
                           Demo Video
                         </p>
                         <div className="relative aspect-video rounded-lg overflow-hidden bg-black">
                           <video
-                            src={`${process.env.NEXT_PUBLIC_API_URL}${selectedExercise.videoDemoUrl}`}
+                            src={`${selectedExercise.videoUrl}`}
                             controls
                             className="absolute inset-0 w-full h-full"
                             controlsList="nodownload"
@@ -987,7 +1011,7 @@ export default function ExercisesManagement() {
           )}
         </div>
       </main>
-       <EditExerciseModal
+      <EditExerciseModal
         isOpen={!!editingExercise}
         exercise={editingExercise}
         onClose={() => setEditingExercise(null)}
