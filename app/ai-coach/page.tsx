@@ -677,12 +677,13 @@ function AICoachContent() {
   const handleCompleteDay = useCallback(async () => {
     if (!workoutId || !currentDay) return;
     setIsCompletingDay(true);
+    const token = getAccessToken();
     try {
       const res = await fetch(
-        `${process.env.NEXT_PUBLIC_API_URL}/api/user-enrollment/complete-day`,
+        `${process.env.NEXT_PUBLIC_API_URL}/api/user-progress/complete-day`,
         {
           method: "PUT",
-          headers: { "Content-Type": "application/json" },
+          headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
           body: JSON.stringify({
             dayNumber:     currentDay,
             planId:        workoutId,

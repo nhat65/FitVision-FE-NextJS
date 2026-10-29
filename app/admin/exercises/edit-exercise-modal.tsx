@@ -11,12 +11,15 @@ import { toast } from "@/components/ui/use-toast";
 interface EditExerciseModalProps {
   isOpen: boolean;
   exercise: {
-    exerciseId: string;
-    exerciseName: string;
-    description: string;
-    muscleGroup: string;
-    difficulty: string;
-    instructions: string;
+    id?: string;
+    exerciseId?: string;
+    name?: string;
+    exerciseName?: string;
+    description?: string;
+    muscleGroup?: string;
+    difficulty?: string;
+    instructions?: string;
+    videoUrl?: string;
     videoDemoUrl?: string;
   } | null;
   onClose: () => void;
@@ -49,13 +52,13 @@ export function EditExerciseModal({
   useEffect(() => {
     if (exercise) {
       setFormData({
-        name: exercise.exerciseName,
-        description: exercise.description,
-        muscleGroup: exercise.muscleGroup,
-        difficulty: exercise.difficulty,
-        instructions: exercise.instructions,
+        name: exercise.name || exercise.exerciseName || "",
+        description: exercise.description || "",
+        muscleGroup: exercise.muscleGroup || "General",
+        difficulty: exercise.difficulty || "intermediate",
+        instructions: exercise.instructions || "",
       });
-      setExistingVideoUrl(exercise.videoDemoUrl);
+      setExistingVideoUrl(exercise.videoUrl || exercise.videoDemoUrl);
       // Cleanup preview URL cũ
       if (videoPreviewUrl) {
         URL.revokeObjectURL(videoPreviewUrl);
@@ -135,7 +138,10 @@ export function EditExerciseModal({
       return;
     }
 
-    await onUpdate(exercise.exerciseId, {
+    const targetId = exercise.id || exercise.exerciseId;
+    if (!targetId) return;
+
+    await onUpdate(targetId, {
       ...formData,
       videoFile,
       removeVideo: !existingVideoUrl && !videoFile,

@@ -184,7 +184,7 @@ export function AICoachPaywall({
             </div>
             <h1 className="text-4xl font-black mb-3">
               Train Smarter,{" "}
-              <span className="bg-gradient-to-r from-primary to-accent bg-clip-text text-transparent">
+              <span className="bg-linear-to-r from-primary to-accent bg-clip-text text-transparent">
                 Not Harder
               </span>
             </h1>
@@ -229,7 +229,7 @@ export function AICoachPaywall({
                         }`}
                       >
                         {plan.badge && (
-                          <span className="absolute -top-2.5 left-1/2 -translate-x-1/2 bg-gradient-to-r from-primary to-accent text-white text-[10px] font-bold px-2.5 py-0.5 rounded-full whitespace-nowrap">
+                          <span className="absolute -top-2.5 left-1/2 -translate-x-1/2 bg-linear-to-r from-primary to-accent text-white text-[10px] font-bold px-2.5 py-0.5 rounded-full whitespace-nowrap">
                             {plan.badge}
                           </span>
                         )}

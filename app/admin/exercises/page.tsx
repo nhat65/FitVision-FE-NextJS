@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useRef } from "react";
+import { useEffect, useState, useRef, useMemo } from "react";
 import { useRouter } from "next/navigation";
 import { AdminSidebar } from "@/components/admin/admin-sidebar";
 import { Card } from "@/components/ui/card";
@@ -8,10 +8,12 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { isAdmin, getCurrentUser } from "@/lib/user-store";
 import {
-  deleteExercise,
-  getExerciseStats,
-  addExercise,
-} from "@/lib/admin-store";
+  useExercises,
+  useCreateExercise,
+  useUpdateExercise,
+  useDeleteExercise,
+  type ExerciseItem,
+} from "@/hooks/useExercises";
 import {
   Trash2,
   Eye,
@@ -21,6 +23,7 @@ import {
   Loader2,
   Upload,
   X,
+  RefreshCw,
 } from "lucide-react";
 import {
   Table,
@@ -31,49 +34,36 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { toast } from "@/components/ui/use-toast";
-import { getAccessToken } from "@/lib/auth-store";
-import { toastSuccess } from "@/lib/toast-utils";
 import { EditExerciseModal } from "./edit-exercise-modal";
-import { uploadVideoToCloudinary } from "@/lib/uploadVideo"; // hàm đã viết ở bước trước
-
-interface ExerciseStat {
-  exerciseId: string;
-  exerciseName: string;
-  description: string;
-  muscleGroup: string;
-  difficulty: string;
-  instructions: string;
-  videoUrl?: string; // URL trả về từ server sau khi upload
-}
-
-interface ApiExercise {
-  id: string;
-  name: string;
-  description: string;
-  muscleGroup: string;
-  difficulty: string;
-  instructions: string;
-  videoUrl?: string;
-}
+import { uploadVideoToCloudinary } from "@/lib/uploadVideo";
 
 export default function ExercisesManagement() {
   const router = useRouter();
-  const [exercises, setExercises] = useState<ExerciseStat[]>([]);
-  const [filteredExercises, setFilteredExercises] = useState<ExerciseStat[]>(
-    [],
-  );
-  const [searchTerm, setSearchTerm] = useState("");
-  const [loading, setLoading] = useState(true);
-  const [selectedExercise, setSelectedExercise] = useState<ExerciseStat | null>(
-    null,
-  );
-  const [showAddForm, setShowAddForm] = useState(false);
-  const [apiError, setApiError] = useState<string | null>(null);
-  const [uploading, setUploading] = useState(false);
-  const videoInputRef = useRef<HTMLInputElement>(null);
-  const [uploadProgress, setUploadProgress] = useState(0);
 
-  // State cho form thêm exercise với video file
+  // TanStack Query Hooks
+  const {
+    data: exercises = [],
+    isLoading,
+    isError,
+    error,
+    refetch,
+    isFetching,
+  } = useExercises();
+
+  const createExerciseMutation = useCreateExercise();
+  const updateExerciseMutation = useUpdateExercise();
+  const deleteExerciseMutation = useDeleteExercise();
+
+  // Local UI States
+  const [searchTerm, setSearchTerm] = useState("");
+  const [selectedExercise, setSelectedExercise] = useState<ExerciseItem | null>(null);
+  const [editingExercise, setEditingExercise] = useState<ExerciseItem | null>(null);
+  const [showAddForm, setShowAddForm] = useState(false);
+  const [uploading, setUploading] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState(0);
+  const videoInputRef = useRef<HTMLInputElement>(null);
+
+  // Form State cho tạo mới Exercise
   const [newExercise, setNewExercise] = useState({
     name: "",
     description: "",
@@ -81,289 +71,42 @@ export default function ExercisesManagement() {
     difficulty: "intermediate",
     instructions: "",
     videoFile: null as File | null,
-    videoPreviewUrl: "" as string, // Để preview video trước khi upload
+    videoPreviewUrl: "",
   });
 
-  const [editingExercise, setEditingExercise] = useState<ExerciseStat | null>(
-    null,
-  );
-
-  // Hàm fetch exercises từ API
-  const fetchExercisesFromAPI = async () => {
-    try {
-      setApiError(null);
-      const token = getAccessToken();
-      const response = await fetch(
-        `${process.env.NEXT_PUBLIC_API_URL}/api/exercises/`,
-        {
-          method: "GET",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${token}`,
-          },
-        },
-      );
-
-      if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
-      }
-
-      const data = await response.json();
-
-      // Transform data từ API về format ExerciseStat
-      const transformedExercises: ExerciseStat[] = data.data.map(
-        (exercise: any) => ({
-          exerciseId: exercise.id,
-          exerciseName: exercise.name,
-          description: exercise.description || "",
-          muscleGroup: exercise.muscleGroup || "General",
-          difficulty: exercise.difficulty || "intermediate",
-          instructions: exercise.instructions || "",
-          videoUrl: exercise.videoUrl || "",
-        }),
-      );
-
-      setExercises(transformedExercises);
-      setFilteredExercises(transformedExercises);
-    } catch (error) {
-      console.error("Error fetching exercises:", error);
-      setApiError("Failed to load exercises from server");
-      toast({
-        title: "Error",
-        description: "Failed to load exercises. Please try again later.",
-        variant: "destructive",
-      });
-
-      // Fallback to local data nếu API fails
-      const exercisesData = getExerciseStats();
-      const transformedLocalData: ExerciseStat[] = exercisesData.map(
-        (exercise: any) => ({
-          exerciseId: exercise.exerciseId,
-          exerciseName: exercise.exerciseName,
-          description: "",
-          muscleGroup: "General",
-          difficulty: "intermediate",
-          instructions: "",
-          videoUrl: "",
-        }),
-      );
-      setExercises(transformedLocalData);
-      setFilteredExercises(transformedLocalData);
-    } finally {
-      setLoading(false);
+  // Kiểm tra quyền Admin
+  useEffect(() => {
+    const user = getCurrentUser();
+    if (!user || !isAdmin()) {
+      router.push("/login");
     }
-  };
+  }, [router]);
 
-  // Hàm thêm exercise: upload video thẳng lên Cloudinary, sau đó gửi metadata + data exercise về API
-  const addExerciseViaAPI = async (exerciseData: {
-    name: string;
-    description: string;
-    muscleGroup: string;
-    difficulty: string;
-    instructions: string;
-    videoFile?: File | null;
-  }) => {
-    try {
-      setUploading(true);
-      const token = getAccessToken();
-
-      let videoData: {
-        url: string;
-        publicId: string;
-        duration: number;
-        format: string;
-        bytes: number;
-      } | null = null;
-
-      // Bước 1: upload video thẳng lên Cloudinary (nếu có), có progress riêng
-      if (exerciseData.videoFile) {
-        videoData = await uploadVideoToCloudinary(
-          exerciseData.videoFile,
-          (percent) => {
-            setUploadProgress(percent); // state progress, tạo thêm nếu chưa có
-          },
-        );
+  // Cleanup preview url khi unmount
+  useEffect(() => {
+    return () => {
+      if (newExercise.videoPreviewUrl) {
+        URL.revokeObjectURL(newExercise.videoPreviewUrl);
       }
+    };
+  }, [newExercise.videoPreviewUrl]);
 
-      // Bước 2: gửi data exercise + metadata video (JSON, không còn dùng FormData)
-      const response = await fetch(
-        `${process.env.NEXT_PUBLIC_API_URL}/api/exercises/`,
-        {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${token}`,
-          },
-          body: JSON.stringify({
-            name: exerciseData.name,
-            description: exerciseData.description,
-            muscleGroup: exerciseData.muscleGroup,
-            difficulty: exerciseData.difficulty,
-            instructions: exerciseData.instructions,
-            ...(videoData && {
-              videoUrl: videoData.url,
-              videoPublicId: videoData.publicId,
-              videoDuration: videoData.duration,
-            }),
-          }),
-        },
-      );
-
-      if (!response.ok) {
-        const errorData = await response.json().catch(() => ({}));
-        throw new Error(
-          errorData.message || `HTTP error! status: ${response.status}`,
-        );
-      }
-
-      const newExercise = await response.json();
-
-      toast({
-        title: "Success",
-        description: "Exercise added successfully",
-      });
-
-      await fetchExercisesFromAPI();
-
-      return newExercise;
-    } catch (error) {
-      console.error("Error adding exercise:", error);
-      toast({
-        title: "Error",
-        description:
-          error instanceof Error
-            ? error.message
-            : "Failed to add exercise. Please try again.",
-        variant: "destructive",
-      });
-      throw error;
-    } finally {
-      setUploading(false);
-      setUploadProgress(0);
-    }
-  };
-
-  // Hàm xóa exercise qua API
-  const deleteExerciseViaAPI = async (
-    exerciseId: string,
-    exerciseName?: string,
-  ) => {
-    try {
-      const token = getAccessToken();
-      const response = await fetch(
-        `${process.env.NEXT_PUBLIC_API_URL}/api/exercises/${exerciseId}`,
-        {
-          method: "DELETE",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${token}`,
-          },
-        },
-      );
-
-      const data = await response.json();
-      toastSuccess(data.message, "Delete exercise");
-
-      if (!response.ok) {
-        throw new Error(
-          data.message || `HTTP error! status: ${response.status}`,
-        );
-      }
-
-      await fetchExercisesFromAPI();
-
-      return true;
-    } catch (error) {
-      console.error("Error deleting exercise:", error);
-
-      // Error toast
-
-      throw error;
-    }
-  };
-
-  // Hàm update exercise qua API
-  const updateExerciseViaAPI = async (
-    exerciseId: string,
-    exerciseData: {
-      name: string;
-      description: string;
-      muscleGroup: string;
-      difficulty: string;
-      instructions: string;
-      videoFile?: File | null;
-      removeVideo?: boolean;
-    },
-  ) => {
-    try {
-      setUploading(true);
-      const token = getAccessToken();
-
-      // Tạo FormData object
-      const formData = new FormData();
-      formData.append("name", exerciseData.name);
-      formData.append("description", exerciseData.description);
-      formData.append("muscleGroup", exerciseData.muscleGroup);
-      formData.append("difficulty", exerciseData.difficulty);
-      formData.append("instructions", exerciseData.instructions);
-
-      if (exerciseData.removeVideo) {
-        formData.append("removeVideo", "true");
-      }
-
-      if (exerciseData.videoFile) {
-        formData.append("video", exerciseData.videoFile);
-      }
-
-      const response = await fetch(
-        `${process.env.NEXT_PUBLIC_API_URL}/api/exercises/`,
-        {
-          method: "PUT",
-          headers: {
-            Authorization: `Bearer ${token}`,
-          },
-          body: formData,
-        },
-      );
-
-      if (!response.ok) {
-        const errorData = await response.json().catch(() => ({}));
-        throw new Error(
-          errorData.message || `HTTP error! status: ${response.status}`,
-        );
-      }
-
-      const updatedExercise = await response.json();
-
-      toast({
-        title: "Success",
-        description: "Exercise updated successfully",
-      });
-
-      await fetchExercisesFromAPI();
-
-      return updatedExercise;
-    } catch (error) {
-      console.error("Error updating exercise:", error);
-      toast({
-        title: "Error",
-        description:
-          error instanceof Error
-            ? error.message
-            : "Failed to update exercise. Please try again.",
-        variant: "destructive",
-      });
-      throw error;
-    } finally {
-      setUploading(false);
-    }
-  };
+  // Filter exercises theo tìm kiếm
+  const filteredExercises = useMemo(() => {
+    const term = searchTerm.toLowerCase().trim();
+    if (!term) return exercises;
+    return exercises.filter(
+      (exercise) =>
+        (exercise.name || "").toLowerCase().includes(term) ||
+        (exercise.muscleGroup || "").toLowerCase().includes(term) ||
+        (exercise.difficulty || "").toLowerCase().includes(term)
+    );
+  }, [exercises, searchTerm]);
 
   // Xử lý chọn video file
   const handleVideoFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
-      // Kiểm tra loại file
       const validTypes = [
         "video/mp4",
         "video/webm",
@@ -373,14 +116,12 @@ export default function ExercisesManagement() {
       if (!validTypes.includes(file.type)) {
         toast({
           title: "Error",
-          description:
-            "Please upload a valid video file (MP4, WebM, OGG, or MOV)",
+          description: "Please upload a valid video file (MP4, WebM, OGG, or MOV)",
           variant: "destructive",
         });
         return;
       }
 
-      // Kiểm tra kích thước file (max 200MB)
       if (file.size > 200 * 1024 * 1024) {
         toast({
           title: "Error",
@@ -390,14 +131,12 @@ export default function ExercisesManagement() {
         return;
       }
 
-      // Tạo preview URL
       const previewUrl = URL.createObjectURL(file);
-
-      setNewExercise({
-        ...newExercise,
+      setNewExercise((prev) => ({
+        ...prev,
         videoFile: file,
         videoPreviewUrl: previewUrl,
-      });
+      }));
     }
   };
 
@@ -406,125 +145,179 @@ export default function ExercisesManagement() {
     if (newExercise.videoPreviewUrl) {
       URL.revokeObjectURL(newExercise.videoPreviewUrl);
     }
-    setNewExercise({
-      ...newExercise,
+    setNewExercise((prev) => ({
+      ...prev,
       videoFile: null,
       videoPreviewUrl: "",
-    });
+    }));
     if (videoInputRef.current) {
       videoInputRef.current.value = "";
     }
   };
 
-  useEffect(() => {
-    const user = getCurrentUser();
-    if (!user || !isAdmin()) {
-      router.push("/login");
-      return;
-    }
-
-    fetchExercisesFromAPI();
-
-    // Cleanup preview URL khi unmount
-    return () => {
-      if (newExercise.videoPreviewUrl) {
-        URL.revokeObjectURL(newExercise.videoPreviewUrl);
-      }
-    };
-  }, [router]);
-
-  useEffect(() => {
-    const filtered = exercises.filter((exercise) =>
-      exercise.exerciseName.toLowerCase().includes(searchTerm.toLowerCase()),
-    );
-    setFilteredExercises(filtered);
-  }, [searchTerm, exercises]);
-
-  const handleDeleteExercise = async (
-    exerciseId: string,
-    exerciseName: string,
-  ) => {
-    if (confirm("Are you sure you want to delete this exercise?")) {
-      try {
-        await deleteExerciseViaAPI(exerciseId, exerciseName);
-      } catch (error) {
-        // Error handling is done in deleteExerciseViaAPI
-      }
-    }
-  };
-
+  // Thêm Exercise mới
   const handleAddExercise = async () => {
-    if (newExercise.name.trim()) {
-      try {
-        await addExerciseViaAPI({
-          name: newExercise.name,
-          description: newExercise.description,
-          muscleGroup: newExercise.muscleGroup,
-          difficulty: newExercise.difficulty,
-          instructions: newExercise.instructions,
-          videoFile: newExercise.videoFile,
-        });
-
-        // Cleanup preview
-        if (newExercise.videoPreviewUrl) {
-          URL.revokeObjectURL(newExercise.videoPreviewUrl);
-        }
-
-        setNewExercise({
-          name: "",
-          description: "",
-          muscleGroup: "General",
-          difficulty: "intermediate",
-          instructions: "",
-          videoFile: null,
-          videoPreviewUrl: "",
-        });
-        setShowAddForm(false);
-      } catch (error) {
-        // Error handling is done in addExerciseViaAPI
-      }
-    } else {
+    if (!newExercise.name.trim()) {
       toast({
-        title: "Error",
+        title: "Validation Error",
         description: "Exercise name is required",
         variant: "destructive",
       });
+      return;
+    }
+
+    try {
+      setUploading(true);
+      let videoData: {
+        url: string;
+        publicId: string;
+        duration: number;
+      } | null = null;
+
+      // Bước 1: Upload video lên Cloudinary nếu có
+      if (newExercise.videoFile) {
+        videoData = await uploadVideoToCloudinary(
+          newExercise.videoFile,
+          (percent) => setUploadProgress(percent)
+        );
+      }
+
+      // Bước 2: Gọi mutation qua React Query
+      await createExerciseMutation.mutateAsync({
+        name: newExercise.name.trim(),
+        description: newExercise.description.trim(),
+        muscleGroup: newExercise.muscleGroup,
+        difficulty: newExercise.difficulty,
+        instructions: newExercise.instructions.trim(),
+        videoUrl: videoData?.url,
+        videoPublicId: videoData?.publicId,
+        videoDuration: videoData?.duration,
+      });
+
+      toast({
+        title: "Success",
+        description: "Exercise created successfully!",
+      });
+
+      // Reset form
+      clearVideoFile();
+      setNewExercise({
+        name: "",
+        description: "",
+        muscleGroup: "General",
+        difficulty: "intermediate",
+        instructions: "",
+        videoFile: null,
+        videoPreviewUrl: "",
+      });
+      setShowAddForm(false);
+    } catch (err: any) {
+      console.error("Add exercise error:", err);
+      toast({
+        title: "Error",
+        description: err.message || "Failed to create exercise. Please try again.",
+        variant: "destructive",
+      });
+    } finally {
+      setUploading(false);
+      setUploadProgress(0);
     }
   };
 
-  // Hàm xử lý update
+  // Cập nhật Exercise
   const handleUpdateExercise = async (id: string, data: any) => {
     try {
-      await updateExerciseViaAPI(id, data);
+      setUploading(true);
+      let videoData: {
+        url: string;
+        publicId: string;
+        duration: number;
+      } | null = null;
+
+      if (data.videoFile) {
+        videoData = await uploadVideoToCloudinary(data.videoFile);
+      }
+
+      await updateExerciseMutation.mutateAsync({
+        id,
+        name: data.name,
+        description: data.description,
+        muscleGroup: data.muscleGroup,
+        difficulty: data.difficulty,
+        instructions: data.instructions,
+        ...(videoData
+          ? {
+              videoUrl: videoData.url,
+              videoPublicId: videoData.publicId,
+              videoDuration: videoData.duration,
+            }
+          : data.removeVideo
+          ? { videoUrl: "", videoPublicId: "" }
+          : {}),
+      });
+
+      toast({
+        title: "Success",
+        description: "Exercise updated successfully!",
+      });
       setEditingExercise(null);
-    } catch (error) {
-      console.error("Error updating exercise:", error);
+    } catch (err: any) {
+      console.error("Update exercise error:", err);
+      toast({
+        title: "Error",
+        description: err.message || "Failed to update exercise.",
+        variant: "destructive",
+      });
+    } finally {
+      setUploading(false);
     }
   };
 
-  if (loading) {
+  // Xóa Exercise
+  const handleDeleteExercise = async (exercise: ExerciseItem) => {
+    if (confirm(`Are you sure you want to delete "${exercise.name}"?`)) {
+      try {
+        await deleteExerciseMutation.mutateAsync(exercise.id);
+        toast({
+          title: "Success",
+          description: `Exercise "${exercise.name}" deleted successfully`,
+        });
+      } catch (err: any) {
+        console.error("Delete exercise error:", err);
+        toast({
+          title: "Cannot Delete Exercise",
+          description: err.message || "Failed to delete exercise.",
+          variant: "destructive",
+        });
+      }
+    }
+  };
+
+  if (isLoading) {
     return (
       <div className="flex items-center justify-center min-h-screen">
         <div className="flex items-center gap-3">
-          <Loader2 className="w-6 h-6 animate-spin" />
+          <Loader2 className="w-6 h-6 animate-spin text-primary" />
           <p className="text-muted-foreground">Loading exercises...</p>
         </div>
       </div>
     );
   }
 
-  if (apiError && exercises.length === 0) {
+  if (isError && exercises.length === 0) {
     return (
       <div className="flex min-h-screen bg-background">
         <AdminSidebar />
         <main className="flex-1">
           <div className="p-8">
-            <Card className="p-8 text-center">
-              <h2 className="text-2xl font-bold mb-4">
-                Unable to Load Exercises
-              </h2>
-              <p className="text-muted-foreground mb-6">{apiError}</p>
-              <Button onClick={fetchExercisesFromAPI}>Try Again</Button>
+            <Card className="p-8 text-center max-w-lg mx-auto mt-20">
+              <h2 className="text-2xl font-bold mb-4">Unable to Load Exercises</h2>
+              <p className="text-muted-foreground mb-6">
+                {(error as Error)?.message || "Failed to load exercises from server."}
+              </p>
+              <Button onClick={() => refetch()} className="flex items-center gap-2 mx-auto">
+                <RefreshCw className="w-4 h-4" /> Try Again
+              </Button>
             </Card>
           </div>
         </main>
@@ -538,11 +331,12 @@ export default function ExercisesManagement() {
 
       <main className="flex-1">
         <div className="p-8">
+          {/* Header */}
           <div className="flex items-center justify-between mb-8">
             <div>
               <h1 className="text-3xl font-bold">Exercises Management</h1>
               <p className="text-muted-foreground mt-2">
-                Manage exercise library
+                Manage exercise library, instructions and demonstration videos
               </p>
             </div>
             <Button
@@ -550,58 +344,54 @@ export default function ExercisesManagement() {
               onClick={() => setShowAddForm(!showAddForm)}
             >
               <Plus className="w-5 h-5" />
-              Add Exercise
+              {showAddForm ? "Close Form" : "Add Exercise"}
             </Button>
           </div>
 
           {/* Add Exercise Form */}
           {showAddForm && (
             <Card className="p-6 mb-6">
-              <h3 className="font-semibold mb-4">Add New Exercise</h3>
+              <h3 className="font-semibold mb-4 text-lg">Add New Exercise</h3>
               <div className="space-y-4">
                 <div>
                   <label className="text-sm font-medium mb-2 block">
                     Exercise Name *
                   </label>
                   <Input
-                    placeholder="e.g., Bench Press, Squat, Push-up..."
+                    placeholder="e.g., Bench Press, Squat, Pull-up..."
                     value={newExercise.name}
                     onChange={(e) =>
-                      setNewExercise({ ...newExercise, name: e.target.value })
+                      setNewExercise((prev) => ({ ...prev, name: e.target.value }))
                     }
                   />
                 </div>
 
                 <div>
-                  <label className="text-sm font-medium mb-2 block">
-                    Description
-                  </label>
+                  <label className="text-sm font-medium mb-2 block">Description</label>
                   <textarea
                     className="w-full p-2 border rounded-md bg-background min-h-20"
                     placeholder="Describe the exercise..."
                     value={newExercise.description}
                     onChange={(e) =>
-                      setNewExercise({
-                        ...newExercise,
+                      setNewExercise((prev) => ({
+                        ...prev,
                         description: e.target.value,
-                      })
+                      }))
                     }
                   />
                 </div>
 
                 <div className="grid grid-cols-2 gap-4">
                   <div>
-                    <label className="text-sm font-medium mb-2 block">
-                      Muscle Group
-                    </label>
+                    <label className="text-sm font-medium mb-2 block">Muscle Group</label>
                     <select
                       className="w-full p-2 border rounded-md bg-background"
                       value={newExercise.muscleGroup}
                       onChange={(e) =>
-                        setNewExercise({
-                          ...newExercise,
+                        setNewExercise((prev) => ({
+                          ...prev,
                           muscleGroup: e.target.value,
-                        })
+                        }))
                       }
                     >
                       <option value="General">General</option>
@@ -616,17 +406,15 @@ export default function ExercisesManagement() {
                   </div>
 
                   <div>
-                    <label className="text-sm font-medium mb-2 block">
-                      Difficulty
-                    </label>
+                    <label className="text-sm font-medium mb-2 block">Difficulty</label>
                     <select
                       className="w-full p-2 border rounded-md bg-background"
                       value={newExercise.difficulty}
                       onChange={(e) =>
-                        setNewExercise({
-                          ...newExercise,
+                        setNewExercise((prev) => ({
+                          ...prev,
                           difficulty: e.target.value,
-                        })
+                        }))
                       }
                     >
                       <option value="beginner">Beginner</option>
@@ -637,21 +425,16 @@ export default function ExercisesManagement() {
                 </div>
 
                 <div>
-                  <label className="text-sm font-medium mb-2 block">
-                    Instructions
-                  </label>
+                  <label className="text-sm font-medium mb-2 block">Instructions</label>
                   <textarea
-                    className="w-full p-2 border rounded-md bg-background min-h-30"
-                    placeholder="Step by step instructions...
-1. Start position...
-2. Movement...
-3. Return to start..."
+                    className="w-full p-2 border rounded-md bg-background min-h-28"
+                    placeholder="Step-by-step instructions..."
                     value={newExercise.instructions}
                     onChange={(e) =>
-                      setNewExercise({
-                        ...newExercise,
+                      setNewExercise((prev) => ({
+                        ...prev,
                         instructions: e.target.value,
-                      })
+                      }))
                     }
                   />
                 </div>
@@ -686,10 +469,9 @@ export default function ExercisesManagement() {
                           variant="ghost"
                           size="sm"
                           onClick={clearVideoFile}
-                          className="text-red-500"
+                          className="text-red-500 hover:text-red-600"
                         >
-                          <X className="w-4 h-4" />
-                          Remove
+                          <X className="w-4 h-4 mr-1" /> Remove
                         </Button>
                       )}
                     </div>
@@ -698,13 +480,10 @@ export default function ExercisesManagement() {
                       <div className="space-y-2">
                         <p className="text-sm text-green-600 dark:text-green-400">
                           Selected: {newExercise.videoFile.name} (
-                          {(newExercise.videoFile.size / (1024 * 1024)).toFixed(
-                            2,
-                          )}{" "}
-                          MB)
+                          {(newExercise.videoFile.size / (1024 * 1024)).toFixed(2)} MB)
                         </p>
                         {newExercise.videoPreviewUrl && (
-                          <div className="relative aspect-video rounded-lg overflow-hidden bg-black">
+                          <div className="relative aspect-video max-w-md rounded-lg overflow-hidden bg-black">
                             <video
                               src={newExercise.videoPreviewUrl}
                               controls
@@ -718,39 +497,41 @@ export default function ExercisesManagement() {
                       </div>
                     )}
 
-                    <p className="text-xs text-muted-foreground">
-                      Supported formats: MP4, WebM, OGG, MOV (Max size: 200MB)
-                    </p>
+                    {uploading && uploadProgress > 0 && (
+                      <div className="space-y-1">
+                        <div className="w-full bg-secondary h-2 rounded-full overflow-hidden">
+                          <div
+                            className="bg-primary h-full transition-all duration-300"
+                            style={{ width: `${uploadProgress}%` }}
+                          />
+                        </div>
+                        <p className="text-xs text-muted-foreground">
+                          Uploading video: {uploadProgress}%
+                        </p>
+                      </div>
+                    )}
                   </div>
                 </div>
 
-                <div className="flex gap-3">
-                  <Button onClick={handleAddExercise} disabled={uploading}>
-                    {uploading ? (
+                <div className="flex gap-3 pt-2">
+                  <Button
+                    onClick={handleAddExercise}
+                    disabled={uploading || createExerciseMutation.isPending}
+                  >
+                    {uploading || createExerciseMutation.isPending ? (
                       <>
                         <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                        Uploading...
+                        Saving...
                       </>
                     ) : (
-                      "Add Exercise"
+                      "Save Exercise"
                     )}
                   </Button>
                   <Button
                     variant="outline"
                     onClick={() => {
-                      if (newExercise.videoPreviewUrl) {
-                        URL.revokeObjectURL(newExercise.videoPreviewUrl);
-                      }
+                      clearVideoFile();
                       setShowAddForm(false);
-                      setNewExercise({
-                        name: "",
-                        description: "",
-                        muscleGroup: "General",
-                        difficulty: "intermediate",
-                        instructions: "",
-                        videoFile: null,
-                        videoPreviewUrl: "",
-                      });
                     }}
                   >
                     Cancel
@@ -761,23 +542,26 @@ export default function ExercisesManagement() {
           )}
 
           {/* Search Bar */}
-          <Card className="p-6 mb-6">
+          <Card className="p-4 mb-6">
             <div className="flex items-center gap-3">
               <Search className="w-5 h-5 text-muted-foreground" />
               <Input
-                placeholder="Search by exercise name..."
+                placeholder="Search by exercise name, muscle group or difficulty..."
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
                 className="flex-1"
               />
-              <p className="text-sm text-muted-foreground">
-                {filteredExercises.length} exercises found
+              <p className="text-sm text-muted-foreground whitespace-nowrap">
+                {filteredExercises.length} / {exercises.length} exercises
               </p>
               <Button
                 variant="outline"
                 size="sm"
-                onClick={fetchExercisesFromAPI}
+                onClick={() => refetch()}
+                disabled={isFetching}
+                className="flex items-center gap-1.5"
               >
+                <RefreshCw className={`w-3.5 h-3.5 ${isFetching ? "animate-spin" : ""}`} />
                 Refresh
               </Button>
             </div>
@@ -791,33 +575,41 @@ export default function ExercisesManagement() {
                   <TableHead>Exercise Name</TableHead>
                   <TableHead>Muscle Group</TableHead>
                   <TableHead>Difficulty</TableHead>
+                  <TableHead>Video Demo</TableHead>
                   <TableHead className="text-right">Actions</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {filteredExercises.length > 0 ? (
                   filteredExercises.map((exercise) => (
-                    <TableRow key={exercise.exerciseId}>
+                    <TableRow key={exercise.id}>
                       <TableCell className="font-semibold">
-                        {exercise.exerciseName}
+                        {exercise.name}
                       </TableCell>
                       <TableCell>
                         <span className="px-2 py-1 bg-muted rounded-md text-sm">
-                          {exercise.muscleGroup}
+                          {exercise.muscleGroup || "General"}
                         </span>
                       </TableCell>
                       <TableCell>
                         <span
                           className={`px-2 py-1 rounded-md text-sm ${
                             exercise.difficulty === "beginner"
-                              ? "bg-green-100 text-green-700 dark:bg-green-900 dark:text-green-300"
+                              ? "bg-green-100 text-green-700 dark:bg-green-900/60 dark:text-green-300"
                               : exercise.difficulty === "intermediate"
-                                ? "bg-yellow-100 text-yellow-700 dark:bg-yellow-900 dark:text-yellow-300"
-                                : "bg-red-100 text-red-700 dark:bg-red-900 dark:text-red-300"
+                              ? "bg-yellow-100 text-yellow-700 dark:bg-yellow-900/60 dark:text-yellow-300"
+                              : "bg-red-100 text-red-700 dark:bg-red-900/60 dark:text-red-300"
                           }`}
                         >
                           {exercise.difficulty}
                         </span>
+                      </TableCell>
+                      <TableCell>
+                        {exercise.videoUrl ? (
+                          <span className="text-xs text-primary font-medium">Available</span>
+                        ) : (
+                          <span className="text-xs text-muted-foreground">None</span>
+                        )}
                       </TableCell>
                       <TableCell className="text-right">
                         <div className="flex justify-end gap-2">
@@ -825,6 +617,7 @@ export default function ExercisesManagement() {
                             variant="ghost"
                             size="sm"
                             onClick={() => setSelectedExercise(exercise)}
+                            title="View details"
                           >
                             <Eye className="w-4 h-4" />
                           </Button>
@@ -832,18 +625,16 @@ export default function ExercisesManagement() {
                             variant="ghost"
                             size="sm"
                             onClick={() => setEditingExercise(exercise)}
+                            title="Edit exercise"
                           >
                             <Edit2 className="w-4 h-4" />
                           </Button>
                           <Button
                             variant="destructive"
                             size="sm"
-                            onClick={() =>
-                              handleDeleteExercise(
-                                exercise.exerciseId,
-                                exercise.exerciseName,
-                              )
-                            }
+                            onClick={() => handleDeleteExercise(exercise)}
+                            disabled={deleteExerciseMutation.isPending}
+                            title="Delete exercise"
                           >
                             <Trash2 className="w-4 h-4" />
                           </Button>
@@ -854,7 +645,7 @@ export default function ExercisesManagement() {
                 ) : (
                   <TableRow>
                     <TableCell
-                      colSpan={4}
+                      colSpan={5}
                       className="text-center py-8 text-muted-foreground"
                     >
                       No exercises found
@@ -882,45 +673,36 @@ export default function ExercisesManagement() {
                   </div>
 
                   <div className="space-y-6">
-                    {/* ID */}
                     <div className="bg-muted/30 p-3 rounded-lg">
                       <p className="text-xs text-muted-foreground uppercase font-semibold mb-1">
                         ID
                       </p>
-                      <p className="font-mono text-sm">
-                        {selectedExercise.exerciseId}
-                      </p>
+                      <p className="font-mono text-sm">{selectedExercise.id}</p>
                     </div>
 
-                    {/* Name */}
                     <div>
                       <p className="text-sm text-muted-foreground font-medium mb-1">
                         Exercise Name
                       </p>
-                      <p className="text-xl font-bold">
-                        {selectedExercise.exerciseName}
-                      </p>
+                      <p className="text-xl font-bold">{selectedExercise.name}</p>
                     </div>
 
-                    {/* Description */}
                     <div>
                       <p className="text-sm text-muted-foreground font-medium mb-1">
                         Description
                       </p>
                       <p className="text-gray-700 dark:text-gray-300">
-                        {selectedExercise.description ||
-                          "No description available"}
+                        {selectedExercise.description || "No description available"}
                       </p>
                     </div>
 
-                    {/* Muscle Group & Difficulty - Grid layout */}
                     <div className="grid grid-cols-2 gap-4">
                       <div>
                         <p className="text-sm text-muted-foreground font-medium mb-1">
                           Muscle Group
                         </p>
                         <span className="inline-block px-3 py-1 bg-muted rounded-md text-sm font-medium">
-                          {selectedExercise.muscleGroup}
+                          {selectedExercise.muscleGroup || "General"}
                         </span>
                       </div>
                       <div>
@@ -930,19 +712,17 @@ export default function ExercisesManagement() {
                         <span
                           className={`inline-block px-3 py-1 rounded-md text-sm font-medium ${
                             selectedExercise.difficulty === "beginner"
-                              ? "bg-green-100 text-green-700 dark:bg-green-900 dark:text-green-300"
+                              ? "bg-green-100 text-green-700 dark:bg-green-900/60 dark:text-green-300"
                               : selectedExercise.difficulty === "intermediate"
-                                ? "bg-yellow-100 text-yellow-700 dark:bg-yellow-900 dark:text-yellow-300"
-                                : "bg-red-100 text-red-700 dark:bg-red-900 dark:text-red-300"
+                              ? "bg-yellow-100 text-yellow-700 dark:bg-yellow-900/60 dark:text-yellow-300"
+                              : "bg-red-100 text-red-700 dark:bg-red-900/60 dark:text-red-300"
                           }`}
                         >
-                          {selectedExercise.difficulty.charAt(0).toUpperCase() +
-                            selectedExercise.difficulty.slice(1)}
+                          {selectedExercise.difficulty}
                         </span>
                       </div>
                     </div>
 
-                    {/* Instructions */}
                     <div>
                       <p className="text-sm text-muted-foreground font-medium mb-2">
                         Instructions
@@ -954,13 +734,10 @@ export default function ExercisesManagement() {
                           </div>
                         </div>
                       ) : (
-                        <p className="text-gray-500 italic">
-                          No instructions provided
-                        </p>
+                        <p className="text-gray-500 italic">No instructions provided</p>
                       )}
                     </div>
 
-                    {/* Video Demo from URL */}
                     {selectedExercise.videoUrl && (
                       <div>
                         <p className="text-sm text-muted-foreground font-medium mb-2">
@@ -968,7 +745,7 @@ export default function ExercisesManagement() {
                         </p>
                         <div className="relative aspect-video rounded-lg overflow-hidden bg-black">
                           <video
-                            src={`${selectedExercise.videoUrl}`}
+                            src={selectedExercise.videoUrl}
                             controls
                             className="absolute inset-0 w-full h-full"
                             controlsList="nodownload"
@@ -979,30 +756,24 @@ export default function ExercisesManagement() {
                       </div>
                     )}
 
-                    {/* Divider */}
-                    <div className="pt-4 border-t border-border">
-                      <div className="flex gap-3">
-                        <Button
-                          variant="outline"
-                          className="flex-1"
-                          onClick={() => setSelectedExercise(null)}
-                        >
-                          Close
-                        </Button>
-                        <Button
-                          variant="destructive"
-                          className="flex-1"
-                          onClick={() => {
-                            handleDeleteExercise(
-                              selectedExercise.exerciseId,
-                              selectedExercise.exerciseName,
-                            );
-                            setSelectedExercise(null);
-                          }}
-                        >
-                          Delete Exercise
-                        </Button>
-                      </div>
+                    <div className="pt-4 border-t border-border flex gap-3">
+                      <Button
+                        variant="outline"
+                        className="flex-1"
+                        onClick={() => setSelectedExercise(null)}
+                      >
+                        Close
+                      </Button>
+                      <Button
+                        variant="destructive"
+                        className="flex-1"
+                        onClick={() => {
+                          handleDeleteExercise(selectedExercise);
+                          setSelectedExercise(null);
+                        }}
+                      >
+                        Delete Exercise
+                      </Button>
                     </div>
                   </div>
                 </div>
@@ -1011,12 +782,13 @@ export default function ExercisesManagement() {
           )}
         </div>
       </main>
+
       <EditExerciseModal
         isOpen={!!editingExercise}
         exercise={editingExercise}
         onClose={() => setEditingExercise(null)}
         onUpdate={handleUpdateExercise}
-        uploading={uploading}
+        uploading={uploading || updateExerciseMutation.isPending}
       />
     </div>
   );

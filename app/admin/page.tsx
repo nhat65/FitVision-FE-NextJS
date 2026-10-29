@@ -1,99 +1,29 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import { AdminSidebar } from '@/components/admin/admin-sidebar'
 import { Card } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { isAdmin, getCurrentUser } from '@/lib/user-store'
-import { getAccessToken } from '@/lib/auth-store'
-import { Users, Dumbbell, Zap, TrendingUp, Calendar, Activity } from 'lucide-react'
+import { Users, Dumbbell, Zap, TrendingUp, Activity } from 'lucide-react'
 import Link from 'next/link'
-
-interface DashboardStats {
-  totalUsers: number
-  activeUsers: number
-  totalPrograms: number
-  totalExercises: number
-  totalWorkoutsSessions: number
-  // Có thể thêm các trường khác từ backend
-}
-
-interface UserActivity {
-  userName: string
-  email: string
-  workoutsSessions: number
-  lastActive: string
-}
-
-interface ProgramStat {
-  programName: string
-  enrolledUsers: number
-}
+import { useAdminDashboard } from '@/hooks/useAdmin'
 
 export default function AdminDashboard() {
   const router = useRouter()
-  const [stats, setStats] = useState<DashboardStats | null>(null)
-  const [userActivity, setUserActivity] = useState<UserActivity[]>([])
-  const [programStats, setProgramStats] = useState<ProgramStat[]>([])
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState<string>('')
 
+  // Kiểm tra quyền admin
   useEffect(() => {
     const user = getCurrentUser()
     if (!user || !isAdmin()) {
       router.push('/login')
-      return
     }
-
-    fetchDashboardData()
   }, [router])
 
-  const fetchDashboardData = async () => {
-    try {
-      setLoading(true)
-      setError('')
+  const { data, isLoading, isError, error } = useAdminDashboard()
 
-      const token = getAccessToken()
-      if (!token) {
-        router.push('/login')
-        return
-      }
-
-      const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/admin/dashboard-stats`, {
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`,
-        },
-      })
-
-      if (!res.ok) {
-        throw new Error('Failed to fetch dashboard statistics')
-      }
-
-      const result = await res.json()
-      const data = result.data || result
-console.log(data)
-      setStats({
-        totalUsers: data.totalUsers || 0,
-        activeUsers: data.activeUsers || 0,
-        totalPrograms: data.totalPrograms || 0,
-        totalExercises: data.totalExercises || 0,
-        totalWorkoutsSessions: data.totalWorkoutsSessions || 0,
-      })
-
-      setUserActivity(data.recentActivity || [])
-      setProgramStats(data.topPrograms || [])
-
-    } catch (err: any) {
-      console.error(err)
-      setError(err.message || 'Failed to load dashboard data')
-    } finally {
-      setLoading(false)
-    }
-  }
-
-  if (loading) {
+  if (isLoading) {
     return (
       <div className="flex items-center justify-center min-h-screen">
         <p className="text-muted-foreground">Loading dashboard...</p>
@@ -101,13 +31,17 @@ console.log(data)
     )
   }
 
-  if (error) {
+  if (isError) {
     return (
       <div className="flex items-center justify-center min-h-screen">
-        <p className="text-destructive">{error}</p>
+        <p className="text-destructive">{(error as Error)?.message || 'Failed to load dashboard data'}</p>
       </div>
     )
   }
+
+  const stats = data
+  const userActivity = data?.recentActivity ?? []
+  const programStats = data?.topPrograms ?? []
 
   return (
     <div className="flex min-h-screen bg-background">
@@ -126,7 +60,7 @@ console.log(data)
               <div className="flex items-center justify-between">
                 <div>
                   <p className="text-sm text-muted-foreground">Total Users</p>
-                  <p className="text-3xl font-bold mt-2">{stats?.totalUsers || 0}</p>
+                  <p className="text-3xl font-bold mt-2">{stats?.totalUsers ?? 0}</p>
                 </div>
                 <Users className="w-10 h-10 text-primary opacity-20" />
               </div>
@@ -136,7 +70,7 @@ console.log(data)
               <div className="flex items-center justify-between">
                 <div>
                   <p className="text-sm text-muted-foreground">Active Users</p>
-                  <p className="text-3xl font-bold mt-2">{stats?.activeUsers || 0}</p>
+                  <p className="text-3xl font-bold mt-2">{stats?.activeUsers ?? 0}</p>
                 </div>
                 <Activity className="w-10 h-10 text-accent opacity-20" />
               </div>
@@ -146,7 +80,7 @@ console.log(data)
               <div className="flex items-center justify-between">
                 <div>
                   <p className="text-sm text-muted-foreground">Total Programs</p>
-                  <p className="text-3xl font-bold mt-2">{stats?.totalPrograms || 0}</p>
+                  <p className="text-3xl font-bold mt-2">{stats?.totalPrograms ?? 0}</p>
                 </div>
                 <Dumbbell className="w-10 h-10 text-primary opacity-20" />
               </div>
@@ -156,7 +90,7 @@ console.log(data)
               <div className="flex items-center justify-between">
                 <div>
                   <p className="text-sm text-muted-foreground">Total Exercises</p>
-                  <p className="text-3xl font-bold mt-2">{stats?.totalExercises || 0}</p>
+                  <p className="text-3xl font-bold mt-2">{stats?.totalExercises ?? 0}</p>
                 </div>
                 <Zap className="w-10 h-10 text-accent opacity-20" />
               </div>
@@ -166,7 +100,7 @@ console.log(data)
               <div className="flex items-center justify-between">
                 <div>
                   <p className="text-sm text-muted-foreground">Workout Sessions</p>
-                  <p className="text-3xl font-bold mt-2">{stats?.totalWorkoutsSessions || 0}</p>
+                  <p className="text-3xl font-bold mt-2">{stats?.totalWorkoutsSessions ?? 0}</p>
                 </div>
                 <TrendingUp className="w-10 h-10 text-primary opacity-20" />
               </div>

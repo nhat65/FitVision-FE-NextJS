@@ -38,7 +38,7 @@ export function getAdminStats(): AdminStats {
   const exercises = getAllExercises();
   const progressData = getAllProgressData();
 
-  const activeUsers = users.filter((u) => {
+  const activeUsers = users.filter((u: any) => {
     const lastActive = getLastActiveDate(u.id);
     return lastActive && new Date().getTime() - lastActive.getTime() < 7 * 24 * 60 * 60 * 1000; // 7 days
   }).length;
@@ -46,7 +46,7 @@ export function getAdminStats(): AdminStats {
   return {
     totalUsers: users.length,
     activeUsers,
-    totalWorkoutsSessions: progressData.reduce((acc, p) => acc + p.workoutSessions, 0),
+    totalWorkoutsSessions: progressData.reduce((acc: number, p: any) => acc + p.workoutSessions, 0),
     totalExercises: exercises.length,
     totalPrograms: programs.length,
   };
@@ -55,7 +55,7 @@ export function getAdminStats(): AdminStats {
 // Get user activity data
 export function getUserActivityData(): UserActivity[] {
   const users = getAllUsers();
-  return users.map((user) => {
+  return users.map((user: any) => {
     const progress = getProgressData(user.id);
     return {
       userId: user.id,
@@ -73,13 +73,13 @@ export function getProgramStats(): ProgramStats[] {
   const programs = getAllPrograms();
   const users = getAllUsers();
 
-  return programs.map((program) => {
-    const enrolledUsers = users.filter((u) => {
+  return programs.map((program: any) => {
+    const enrolledUsers = users.filter((u: any) => {
       const progress = getProgressData(u.id);
       return progress?.currentProgram === program.id;
     }).length;
 
-    const completedUsers = users.filter((u) => {
+    const completedUsers = users.filter((u: any) => {
       const progress = getProgressData(u.id);
       return progress?.completedPrograms?.includes(program.id);
     }).length;
@@ -101,12 +101,12 @@ export function getExerciseStats(): ExerciseStats[] {
   const exercises = getAllExercises();
   const progressData = getAllProgressData();
 
-  return exercises.map((exercise) => {
+  return exercises.map((exercise: any) => {
     let totalPerformed = 0;
     let totalReps = 0;
     let performCount = 0;
 
-    progressData.forEach((progress) => {
+    progressData.forEach((progress: any) => {
       if (progress.exercises) {
         const exerciseData = progress.exercises[exercise.id];
         if (exerciseData) {

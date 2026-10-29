@@ -352,12 +352,16 @@ export default function WorkoutDetailPage({ params }: WorkoutDetailPageProps) {
             },
           );
           if (completedRes.ok) {
-            const completedData = await completedRes.json();
-            const days = completedData.data?.[0]?.completedDays || [];
-            setCompletedDays(
-              days.map((d: any) => (typeof d === "number" ? d : parseInt(d))),
-            );
-          }
+  const completedData = await completedRes.json();
+
+  const days: number[] = (completedData.data ?? [])
+    .flatMap((progress: any) => progress.userProgressDay ?? [])
+    .filter((d: any) => d.completed)
+    .map((d: any) => Number(d.dayNumber))
+    .filter((n: number) => Number.isFinite(n));
+
+  setCompletedDays(Array.from(new Set(days)));
+}
         }
       } catch (error) {
         console.error("Error fetching enrollment status:", error);
@@ -413,12 +417,17 @@ export default function WorkoutDetailPage({ params }: WorkoutDetailPageProps) {
   }
 
   // Group schedule by weeks (4 tuần x 7 ngày)
-  const weeks = [
-    workout.schedule.slice(0, 7),
-    workout.schedule.slice(7, 14),
-    workout.schedule.slice(14, 21),
-    workout.schedule.slice(21, 28),
-  ];
+  const weeks = Array.from(
+  { length: Math.ceil(workout.schedule.length / 7) },
+  (_, i) => workout.schedule.slice(i * 7, i * 7 + 7),
+);
+const trainingDays = workout.schedule.filter((d) => !d.isRestDay).length;
+const completedCount = completedDays.filter((d) =>
+  workout.schedule.some((s) => s.day === d && !s.isRestDay),
+).length;
+const progress = trainingDays
+  ? Math.round((completedCount / trainingDays) * 100)
+  : 0;
 
   return (
     <div className="min-h-screen flex flex-col">
@@ -477,13 +486,7 @@ export default function WorkoutDetailPage({ params }: WorkoutDetailPageProps) {
                     Enrolled
                   </div>
                   <div className="text-xs text-muted-foreground">
-                    Progress:{" "}
-                    {workout
-                      ? Math.round(
-                          (completedDays.length / workout.totalDays) * 100,
-                        )
-                      : 0}
-                    %
+                    Progress: {progress}%
                   </div>
                 </div>
               )}
@@ -554,16 +557,16 @@ export default function WorkoutDetailPage({ params }: WorkoutDetailPageProps) {
 
               {/* Week tabs */}
               <div className="flex gap-2 mb-8 overflow-x-auto pb-2">
-                {[1, 2, 3, 4].map((week) => (
-                  <Button
-                    key={week}
-                    variant={activeWeek === week ? "default" : "outline"}
-                    onClick={() => setActiveWeek(week)}
-                    className="whitespace-nowrap"
-                  >
-                    Week {week}
-                  </Button>
-                ))}
+                {weeks.map((_, i) => (
+  <Button
+    key={i}
+    variant={activeWeek === i + 1 ? "default" : "outline"}
+    onClick={() => setActiveWeek(i + 1)}
+    className="whitespace-nowrap"
+  >
+    Week {i + 1}
+  </Button>
+))}
               </div>
 
               {/* Week content */}

@@ -1,113 +1,62 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo } from "react";
 import { useRouter } from "next/navigation";
 import { AdminSidebar } from "@/components/admin/admin-sidebar";
 import { Card } from "@/components/ui/card";
 import { isAdmin, getCurrentUser } from "@/lib/user-store";
-import { getAccessToken } from "@/lib/auth-store";
 import { TrendingUp, Users, Zap, Target } from "lucide-react";
-
-interface AnalyticsStats {
-  totalUsers: number;
-  activeUsers: number;
-  totalWorkoutsSessions: number;
-}
-
-interface UserActivity {
-  userName: string;
-  email: string;
-  workoutsSessions: number;
-  currentProgram: string | null;
-  lastActive: string;
-}
-
-interface ProgramStat {
-  programName: string;
-  enrolledUsers: number;
-  completionRate: number;
-  averageRating: number;
-}
-
-interface ExerciseStat {
-  exerciseName: string;
-  timesPerformed: number;
-  averageReps: number;
-}
-
-interface AnalyticsData {
-  stats: AnalyticsStats;
-  userActivity: UserActivity[];
-  programs: ProgramStat[];
-  exercises: ExerciseStat[];
-}
+import { useAdminAnalytics } from "@/hooks/useAdmin";
 
 export default function AnalyticsDashboard() {
   const router = useRouter();
-  const [analyticsData, setAnalyticsData] = useState<AnalyticsData | null>(
-    null,
-  );
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string>("");
 
+  // Kiểm tra quyền admin
   useEffect(() => {
     const user = getCurrentUser();
     if (!user || !isAdmin()) {
       router.push("/login");
-      return;
     }
-
-    fetchAnalyticsData();
   }, [router]);
 
-  const fetchAnalyticsData = async () => {
-    try {
-      setLoading(true);
-      setError("");
+  const { data: analyticsData, isLoading, isError, error } = useAdminAnalytics();
 
-      const token = getAccessToken();
-      if (!token) {
-        router.push("/login");
-        return;
-      }
+  // Tính toán các giá trị dẫn xuất
+  const derived = useMemo(() => {
+    if (!analyticsData) return null;
 
-      const res = await fetch(
-        `${process.env.NEXT_PUBLIC_API_URL}/api/admin/analytics`,
-        {
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${token}`,
-          },
-        },
-      );
+    const { stats, programs, exercises } = analyticsData;
 
-      if (!res.ok) {
-        throw new Error("Failed to fetch analytics data");
-      }
+    const engagementRate =
+      stats.totalUsers > 0
+        ? Math.round((stats.activeUsers / stats.totalUsers) * 100)
+        : 0;
 
-      const result = await res.json();
-      const data = result.data || result;
+    const avgSessionPerUser =
+      stats.totalUsers > 0
+        ? Math.round(stats.totalWorkoutsSessions / stats.totalUsers)
+        : 0;
 
-      // Map đúng cấu trúc payload
-      setAnalyticsData({
-        stats: {
-          totalUsers: data.stats?.totalUsers || 0,
-          activeUsers: data.stats?.activeUsers || 0,
-          totalWorkoutsSessions: data.stats?.totalWorkoutsSessions || 0,
-        },
-        userActivity: data.userActivity || [],
-        programs: data.programs || [],
-        exercises: data.exercises || [],
-      });
-    } catch (err: any) {
-      console.error(err);
-      setError(err.message || "Failed to load analytics data");
-    } finally {
-      setLoading(false);
-    }
-  };
+    const avgCompletionRate =
+      programs.length > 0
+        ? Math.round(programs.reduce((a, p) => a + p.completionRate, 0) / programs.length)
+        : 0;
 
-  if (loading) {
+    const avgPerforms =
+      exercises.length > 0
+        ? Math.round(exercises.reduce((a, e) => a + e.timesPerformed, 0) / exercises.length)
+        : 0;
+
+    const topPrograms = programs.slice(0, 3);
+
+    const topExercises = [...exercises]
+      .sort((a, b) => b.timesPerformed - a.timesPerformed)
+      .slice(0, 5);
+
+    return { engagementRate, avgSessionPerUser, avgCompletionRate, avgPerforms, topPrograms, topExercises };
+  }, [analyticsData]);
+
+  if (isLoading) {
     return (
       <div className="flex items-center justify-center min-h-screen">
         <p className="text-muted-foreground">Loading analytics...</p>
@@ -115,15 +64,15 @@ export default function AnalyticsDashboard() {
     );
   }
 
-  if (error) {
+  if (isError) {
     return (
       <div className="flex items-center justify-center min-h-screen">
-        <p className="text-destructive">{error}</p>
+        <p className="text-destructive">{(error as Error)?.message || "Failed to load analytics data"}</p>
       </div>
     );
   }
 
-  if (!analyticsData) {
+  if (!analyticsData || !derived) {
     return (
       <div className="flex items-center justify-center min-h-screen">
         <p className="text-muted-foreground">No data available</p>
@@ -132,26 +81,7 @@ export default function AnalyticsDashboard() {
   }
 
   const { stats, userActivity, programs, exercises } = analyticsData;
-
-  // Calculate engagement rate
-  const engagementRate =
-    stats.totalUsers > 0
-      ? Math.round((stats.activeUsers / stats.totalUsers) * 100)
-      : 0;
-
-  // Get top 3 programs
-  const topPrograms = programs.slice(0, 3);
-
-  // Get top 5 exercises
-  const topExercises = [...exercises]
-    .sort((a, b) => b.timesPerformed - a.timesPerformed)
-    .slice(0, 5);
-
-  // Calculate average session per user
-  const avgSessionPerUser =
-    stats.totalUsers > 0
-      ? Math.round(stats.totalWorkoutsSessions / stats.totalUsers)
-      : 0;
+  const { engagementRate, avgSessionPerUser, avgCompletionRate, avgPerforms, topPrograms, topExercises } = derived;
 
   return (
     <div className="flex min-h-screen bg-background">
@@ -205,13 +135,7 @@ export default function AnalyticsDashboard() {
                     Program Completion
                   </p>
                   <p className="text-3xl font-bold mt-2">
-                    {programs.length > 0
-                      ? Math.round(
-                          programs.reduce((a, p) => a + p.completionRate, 0) /
-                            programs.length,
-                        )
-                      : 0}
-                    %
+                    {avgCompletionRate}%
                   </p>
                   <p className="text-xs text-muted-foreground mt-2">
                     {programs.length} programs
@@ -229,13 +153,7 @@ export default function AnalyticsDashboard() {
                   </p>
                   <p className="text-3xl font-bold mt-2">{exercises.length}</p>
                   <p className="text-xs text-muted-foreground mt-2">
-                    {exercises.length > 0
-                      ? Math.round(
-                          exercises.reduce((a, e) => a + e.timesPerformed, 0) /
-                            exercises.length,
-                        )
-                      : 0}{" "}
-                    avg performs
+                    {avgPerforms} avg performs
                   </p>
                 </div>
                 <Zap className="w-10 h-10 text-accent opacity-20" />

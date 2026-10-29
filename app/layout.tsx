@@ -5,6 +5,7 @@ import { Inter, Space_Grotesk } from 'next/font/google';
 import { Analytics } from '@vercel/analytics/next';
 import { Toaster } from 'sonner'; // ✅ Import từ sonner
 import { ChatBot } from '@/components/chatbot'
+import { QueryProvider } from '@/components/providers/query-provider';
 import './globals.css';
 
 const inter = Inter({ subsets: ["latin"] });
@@ -33,10 +34,12 @@ export default function RootLayout({
   return (
     <html lang="en">
       <body className={`font-sans antialiased min-h-screen bg-background text-foreground`}>
-        {children}
-         <ChatBot />
-        <Analytics />
-        <Toaster position="top-right" richColors /> {/* ✅ Sonner Toaster */}
+        <QueryProvider>
+          {children}
+          <ChatBot />
+          <Analytics />
+          <Toaster position="top-right" richColors /> {/* ✅ Sonner Toaster */}
+        </QueryProvider>
       </body>
     </html>
   );

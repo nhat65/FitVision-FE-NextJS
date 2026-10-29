@@ -18,8 +18,8 @@ import { toast } from "sonner";
 interface AvailableExercise {
   id: string;
   name: string;
-  muscleGroup: string | null;
-  difficulty: string;
+  muscleGroup?: string | null;
+  difficulty?: string;
 }
 
 interface PlanExercise {
