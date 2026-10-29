@@ -1,13 +1,10 @@
 "use client";
 
-import { use, useState, useEffect } from "react";
+import { use, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { notFound } from "next/navigation";
-import { Header } from "@/components/layout/header";
-import { Footer } from "@/components/layout/footer";
-import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Skeleton } from "@/components/ui/skeleton";
+import { useRouter } from "next/navigation";
+import { useQueryClient } from "@tanstack/react-query";
+import { toast } from "sonner";
 import {
   ArrowLeft,
   Clock,
@@ -18,11 +15,27 @@ import {
   CheckCircle2,
   Coffee,
   Lock,
+  type LucideIcon,
 } from "lucide-react";
+import { Header } from "@/components/layout/header";
+import { Footer } from "@/components/layout/footer";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent } from "@/components/ui/card";
+import { Skeleton } from "@/components/ui/skeleton";
 import { PricingModal } from "@/components/payment/pricing-modal";
-import { getAccessToken } from "@/lib/auth-store";
 import { getCurrentUser, type UserProfile } from "@/lib/user-store";
 import { difficultyColors } from "@/lib/workout-data";
+import { useProgram, type ProgramItem } from "@/hooks/usePrograms";
+import {
+  useMyEnrollments,
+  useCompletedDays,
+  useEnroll,
+  enrollmentKeys,
+} from "@/hooks/useEnrollments";
+
+/* -------------------------------------------------------------------------- */
+/* Types                                                                      */
+/* -------------------------------------------------------------------------- */
 
 export type DifficultyLevel = "beginner" | "intermediate" | "advanced";
 
@@ -49,75 +62,6 @@ export interface DayWorkout {
   focusArea?: string;
 }
 
-const WEEK_DAYS = [
-  "Monday",
-  "Tuesday",
-  "Wednesday",
-  "Thursday",
-  "Friday",
-  "Saturday",
-  "Sunday",
-];
-
-function buildScheduleFromPlanExercises(
-  planExercises: any[] = [],
-  totalDays: number = 30,
-) {
-  const exercisesByDay = planExercises.reduce<Record<string, any[]>>(
-    (acc, item) => {
-      const dayKey = item.dayOfWeek || "Rest";
-      if (!acc[dayKey]) acc[dayKey] = [];
-      acc[dayKey].push(item);
-      return acc;
-    },
-    {},
-  );
-
-  Object.values(exercisesByDay).forEach((items) => {
-    items.sort((a: any, b: any) => (a.order ?? 0) - (b.order ?? 0));
-  });
-
-  return Array.from({ length: totalDays }, (_, index) => {
-    const day = index + 1;
-    const weekDay = WEEK_DAYS[index % WEEK_DAYS.length];
-    const dayExercises = exercisesByDay[weekDay] ?? [];
-
-    if (!dayExercises.length) {
-      return {
-        day,
-        name: `Day ${day}`,
-        exercises: [],
-        isRestDay: true,
-      };
-    }
-
-    return {
-      day,
-      name: weekDay,
-      focusArea: `${weekDay} training`,
-      exercises: dayExercises.map((item: any) => ({
-        id: item.exercise?.id ?? item.exerciseId ?? `exercise-${item.id}`,
-        name: item.exercise?.name ?? "Exercise",
-        description: item.exercise?.description ?? "",
-        muscleGroups: item.exercise?.muscleGroup
-          ? [item.exercise.muscleGroup]
-          : [],
-        difficulty:
-          (item.exercise?.difficulty as DifficultyLevel) ?? "beginner",
-        instructions: item.exercise?.instructions
-          ? [item.exercise.instructions]
-          : [],
-        reps: item.reps ?? item.exercise?.reps,
-        sets: item.sets,
-        duration: undefined,
-        restTime: item.restTime ?? 0,
-        videoUrl: item.exercise?.videoDemoUrl || undefined,
-        thumbnailUrl: undefined,
-      })),
-    };
-  });
-}
-
 export type Workout = {
   id: string;
   name: string;
@@ -139,6 +83,123 @@ interface WorkoutDetailPageProps {
   params: Promise<{ id: string }>;
 }
 
+/* -------------------------------------------------------------------------- */
+/* Mapping: ProgramItem (API) -> Workout (UI)                                 */
+/* -------------------------------------------------------------------------- */
+
+const WEEK_DAYS = [
+  "Monday",
+  "Tuesday",
+  "Wednesday",
+  "Thursday",
+  "Friday",
+  "Saturday",
+  "Sunday",
+];
+
+function buildSchedule(
+  planExercises: ProgramItem["planExercises"] = [],
+  totalDays: number,
+): DayWorkout[] {
+  const exercisesByDay = planExercises.reduce<
+    Record<string, NonNullable<ProgramItem["planExercises"]>>
+  >((acc, item) => {
+    const dayKey = item.dayOfWeek || "Rest";
+    (acc[dayKey] ??= []).push(item);
+    return acc;
+  }, {});
+
+  Object.values(exercisesByDay).forEach((items) =>
+    items.sort((a, b) => (a.order ?? 0) - (b.order ?? 0)),
+  );
+
+  return Array.from({ length: totalDays }, (_, index) => {
+    const day = index + 1;
+    const weekDay = WEEK_DAYS[index % WEEK_DAYS.length];
+    const dayExercises = exercisesByDay[weekDay] ?? [];
+
+    if (!dayExercises.length) {
+      return { day, name: `Day ${day}`, exercises: [], isRestDay: true };
+    }
+
+    return {
+      day,
+      name: weekDay,
+      focusArea: `${weekDay} training`,
+      exercises: dayExercises.map((item) => {
+        const ex = item.exercise as any; // API có thể trả thêm field ngoài ExerciseItem
+        return {
+          id: ex?.id ?? item.exerciseId ?? `exercise-${item.id}`,
+          name: ex?.name ?? "Exercise",
+          description: ex?.description ?? "",
+          muscleGroups: ex?.muscleGroup ? [ex.muscleGroup] : [],
+          difficulty: (ex?.difficulty as DifficultyLevel) ?? "beginner",
+          instructions: ex?.instructions ? [ex.instructions] : [],
+          reps: item.reps,
+          sets: item.sets,
+          duration: undefined,
+          restTime: item.restTime ?? 0,
+          videoUrl: ex?.videoDemoUrl || ex?.videoUrl || undefined,
+          thumbnailUrl: undefined,
+        };
+      }),
+    };
+  });
+}
+
+function mapProgramToWorkout(program: ProgramItem): Workout {
+  const raw = program as ProgramItem & {
+    category?: Workout["category"];
+    imageUrl?: string;
+  };
+  const totalDays = raw.totalDays ?? 30;
+
+  return {
+    id: raw.id,
+    name: raw.name ?? "",
+    description: raw.description ?? "",
+    difficulty: (raw.difficulty as DifficultyLevel) ?? "beginner",
+    totalDays,
+    durationPerSession: raw.durationPerSession ?? "",
+    caloriesPerSession: raw.caloriesPerSession ?? 0,
+    category: raw.category ?? "full-body",
+    imageUrl: raw.imageUrl ?? undefined,
+    goals: raw.goals ?? [],
+    isPremium: raw.isPremium ?? false,
+    price: raw.price ?? 0,
+    aiMonitoringFee: raw.aiMonitoringFee ?? 0,
+    schedule: buildSchedule(raw.planExercises, totalDays),
+  };
+}
+
+/* -------------------------------------------------------------------------- */
+/* Small components                                                           */
+/* -------------------------------------------------------------------------- */
+
+function StatItem({
+  icon: Icon,
+  label,
+  value,
+  iconClassName = "text-primary",
+  valueClassName = "",
+}: {
+  icon: LucideIcon;
+  label: string;
+  value: string;
+  iconClassName?: string;
+  valueClassName?: string;
+}) {
+  return (
+    <div className="flex items-center gap-3">
+      <Icon className={`h-5 w-5 ${iconClassName}`} />
+      <div>
+        <div className="text-sm text-muted-foreground">{label}</div>
+        <div className={`font-semibold ${valueClassName}`}>{value}</div>
+      </div>
+    </div>
+  );
+}
+
 function DayCard({
   dayWorkout,
   workoutId,
@@ -152,10 +213,10 @@ function DayCard({
 }) {
   if (dayWorkout.isRestDay) {
     return (
-      <div className="p-4 rounded-xl bg-secondary/50 border border-border">
+      <div className="rounded-xl border border-border bg-secondary/50 p-4">
         <div className="flex items-center gap-3">
-          <div className="flex items-center justify-center w-10 h-10 rounded-full bg-green-500/20 text-green-400 font-bold text-sm">
-            <Coffee className="w-5 h-5" />
+          <div className="flex h-10 w-10 items-center justify-center rounded-full bg-green-500/20 text-sm font-bold text-green-400">
+            <Coffee className="h-5 w-5" />
           </div>
           <div>
             <div className="font-medium">Day {dayWorkout.day}</div>
@@ -168,10 +229,10 @@ function DayCard({
 
   if (!isEnrolled) {
     return (
-      <div className="p-4 rounded-xl bg-secondary/30 border border-border opacity-60">
+      <div className="rounded-xl border border-border bg-secondary/30 p-4 opacity-60">
         <div className="flex items-center gap-3">
-          <div className="flex items-center justify-center w-10 h-10 rounded-full bg-secondary font-bold text-sm">
-            <Lock className="w-5 h-5" />
+          <div className="flex h-10 w-10 items-center justify-center rounded-full bg-secondary text-sm font-bold">
+            <Lock className="h-5 w-5" />
           </div>
           <div>
             <div className="font-medium">Day {dayWorkout.day}</div>
@@ -186,26 +247,26 @@ function DayCard({
 
   return (
     <Link
-      href={`/ai-coach?workout=${workoutId}&day=${dayWorkout.day}&dayOfWeek=${dayWorkout.name}`}
+      href={`/ai-coach?workout=${workoutId}&day=${dayWorkout.day}&dayOfWeek=${encodeURIComponent(dayWorkout.name)}`}
       className="block"
     >
       <Card
         className={`transition-all duration-300 hover:border-primary/50 ${
-          isCompleted ? "bg-green-500/5 border-green-500/30" : ""
+          isCompleted ? "border-green-500/30 bg-green-500/5" : ""
         }`}
       >
         <CardContent className="p-4">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-3">
               <div
-                className={`flex items-center justify-center w-10 h-10 rounded-full font-bold text-sm ${
+                className={`flex h-10 w-10 items-center justify-center rounded-full text-sm font-bold ${
                   isCompleted
                     ? "bg-green-500 text-white"
                     : "bg-primary/10 text-primary"
                 }`}
               >
                 {isCompleted ? (
-                  <CheckCircle2 className="w-5 h-5" />
+                  <CheckCircle2 className="h-5 w-5" />
                 ) : (
                   dayWorkout.day
                 )}
@@ -219,7 +280,7 @@ function DayCard({
               </div>
             </div>
             <Button size="sm" variant="ghost">
-              <Play className="w-4 h-4" />
+              <Play className="h-4 w-4" />
             </Button>
           </div>
         </CardContent>
@@ -228,183 +289,104 @@ function DayCard({
   );
 }
 
-export default function WorkoutDetailPage({ params }: WorkoutDetailPageProps) {
-  const { id } = use(params); // vẫn giữ use(params) vì là Server Component props
-
-  const [workout, setWorkout] = useState<Workout | null>(null);
-  const [isLoading, setIsLoading] = useState(true);
-  const [error, setError] = useState<string>("");
-
-  const [activeWeek, setActiveWeek] = useState(1);
-  const [pricingOpen, setPricingOpen] = useState(false);
-  const [user, setUser] = useState<UserProfile | null>(null);
-  const [isEnrolled, setIsEnrolled] = useState(false);
-  const [completedDays, setCompletedDays] = useState<number[]>([]);
-  const [enrollment, setEnrollment] = useState<any>(null);
-
-  // Fetch workout detail từ API
-  useEffect(() => {
-    const fetchWorkout = async () => {
-      try {
-        setIsLoading(true);
-        setError("");
-
-        const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/workout-plan/${id}`);
-
-        if (!response.ok) {
-          if (response.status === 404) {
-            notFound();
-          }
-          throw new Error("Failed to fetch workout details");
-        }
-
-        const data = await response.json();
-        const workoutData = data.data || data; // hỗ trợ cả hai dạng {data: ...} hoặc trực tiếp
-
-        const mappedWorkout: Workout = {
-          id: workoutData.id,
-          name: workoutData.name ?? "",
-          description: workoutData.description ?? "",
-          difficulty: workoutData.difficulty ?? "beginner",
-          totalDays: workoutData.totalDays ?? 30,
-          durationPerSession: workoutData.durationPerSession ?? "",
-          caloriesPerSession: workoutData.caloriesPerSession ?? 0,
-          category: workoutData.category ?? "full-body",
-          imageUrl: workoutData.imageUrl ?? undefined,
-          goals: workoutData.goals ?? [],
-          isPremium: workoutData.isPremium ?? false,
-          price: workoutData.price ?? 0,
-          aiMonitoringFee: workoutData.aiMonitoringFee ?? 0,
-          schedule: buildScheduleFromPlanExercises(
-            workoutData.planExercises,
-            workoutData.totalDays ?? 30,
-          ),
-        };
-
-        setWorkout(mappedWorkout);
-      } catch (err: any) {
-        console.error("Error fetching workout:", err);
-        setError(err.message || "Không thể tải thông tin chương trình tập");
-      } finally {
-        setIsLoading(false);
-      }
-    };
-
-    fetchWorkout();
-  }, [id]);
-
-  // Load user & enrollment status
-  useEffect(() => {
-    const currentUser = getCurrentUser();
-    setUser(currentUser);
-
-    const fetchEnrollmentAndProgress = async () => {
-      if (!currentUser) {
-        setIsEnrolled(false);
-        setEnrollment(null);
-        setCompletedDays([]);
-        return;
-      }
-
-      const token = getAccessToken();
-      if (!token) {
-        setIsEnrolled(false);
-        setEnrollment(null);
-        setCompletedDays([]);
-        return;
-      }
-
-      try {
-        const enrollRes = await fetch(
-          `${process.env.NEXT_PUBLIC_API_URL}/api/user-enrollment/`,
-          {
-            headers: {
-              "Content-Type": "application/json",
-              Authorization: `Bearer ${token}`,
-            },
-          },
-        );
-
-        if (!enrollRes.ok) {
-          console.warn("Unable to fetch enrollments", enrollRes.statusText);
-          setIsEnrolled(false);
-          setEnrollment(null);
-          return;
-        }
-
-        const enrollResult = await enrollRes.json();
-        const enrollments = enrollResult.data || [];
-        const currentEnrollment = enrollments.find(
-          (e: any) => e.planId === id || e.plan?.id === id,
-        );
-
-        const enrolled = !!currentEnrollment;
-        setIsEnrolled(enrolled);
-        setEnrollment(currentEnrollment);
-        if (enrolled && currentEnrollment?.planId) {
-          const completedRes = await fetch(
-            `${process.env.NEXT_PUBLIC_API_URL}/api/user-enrollment/${currentEnrollment.planId}/completed-days`,
-            {
-              headers: {
-                "Content-Type": "application/json",
-                Authorization: `Bearer ${token}`,
-              },
-            },
-          );
-          if (completedRes.ok) {
-  const completedData = await completedRes.json();
-
-  const days: number[] = (completedData.data ?? [])
-    .flatMap((progress: any) => progress.userProgressDay ?? [])
-    .filter((d: any) => d.completed)
-    .map((d: any) => Number(d.dayNumber))
-    .filter((n: number) => Number.isFinite(n));
-
-  setCompletedDays(Array.from(new Set(days)));
-}
-        }
-      } catch (error) {
-        console.error("Error fetching enrollment status:", error);
-        setIsEnrolled(false);
-        setEnrollment(null);
-      }
-    };
-
-    fetchEnrollmentAndProgress();
-  }, [id]);
-
-  // Loading state
-  if (isLoading) {
-    return (
-      <div className="min-h-screen flex flex-col">
-        <Header />
-        <main className="flex-1 pt-24 pb-16">
-          <div className="mx-auto max-w-6xl px-6 lg:px-8">
-            <Skeleton className="h-10 w-40 mb-8" />
-            <div className="space-y-8">
-              <Skeleton className="h-12 w-3/4" />
-              <Skeleton className="h-6 w-1/2" />
-              <div className="grid grid-cols-4 gap-4">
-                {Array.from({ length: 4 }).map((_, i) => (
-                  <Skeleton key={i} className="h-20" />
-                ))}
-              </div>
+function PageSkeleton() {
+  return (
+    <div className="flex min-h-screen flex-col">
+      <Header />
+      <main className="flex-1 pb-16 pt-24">
+        <div className="mx-auto max-w-6xl px-6 lg:px-8">
+          <Skeleton className="mb-8 h-10 w-40" />
+          <div className="space-y-8">
+            <Skeleton className="h-12 w-3/4" />
+            <Skeleton className="h-6 w-1/2" />
+            <div className="grid grid-cols-4 gap-4">
+              {Array.from({ length: 4 }).map((_, i) => (
+                <Skeleton key={i} className="h-20" />
+              ))}
             </div>
           </div>
-        </main>
-        <Footer />
-      </div>
-    );
-  }
+        </div>
+      </main>
+      <Footer />
+    </div>
+  );
+}
 
-  if (error || !workout) {
+/* -------------------------------------------------------------------------- */
+/* Page                                                                       */
+/* -------------------------------------------------------------------------- */
+
+export default function WorkoutDetailPage({ params }: WorkoutDetailPageProps) {
+  const { id } = use(params);
+  const router = useRouter();
+  const queryClient = useQueryClient();
+
+  // UI state
+  const [user, setUser] = useState<UserProfile | null>(null);
+  const [activeWeek, setActiveWeek] = useState(1);
+  const [pricingOpen, setPricingOpen] = useState(false);
+
+  useEffect(() => {
+    setUser(getCurrentUser()); // đọc localStorage nên phải chạy ở client
+  }, []);
+
+  // Server state
+  const {
+    data: program,
+    isLoading: isProgramLoading,
+    error: programError,
+  } = useProgram(id);
+
+  const { data: enrollments, isLoading: isEnrollmentLoading } =
+    useMyEnrollments(!!user);
+
+  const isEnrolled = enrollments?.some((e) => e.planId === id) ?? false;
+
+  const { data: completedDays = [] } = useCompletedDays(id, isEnrolled);
+
+  const enroll = useEnroll();
+
+  // Derived state (phải đặt trước mọi return sớm để giữ thứ tự hook)
+  const workout = useMemo(
+    () => (program ? mapProgramToWorkout(program) : null),
+    [program],
+  );
+
+  const { weeks, progress } = useMemo(() => {
+    if (!workout) return { weeks: [] as DayWorkout[][], progress: 0 };
+
+    const weeks = Array.from(
+      { length: Math.ceil(workout.schedule.length / 7) },
+      (_, i) => workout.schedule.slice(i * 7, i * 7 + 7),
+    );
+
+    const trainingDays = new Set(
+      workout.schedule.filter((d) => !d.isRestDay).map((d) => d.day),
+    );
+    const completedCount = completedDays.filter((d) =>
+      trainingDays.has(d),
+    ).length;
+
+    return {
+      weeks,
+      progress: trainingDays.size
+        ? Math.round((completedCount / trainingDays.size) * 100)
+        : 0,
+    };
+  }, [workout, completedDays]);
+
+  /* ----------------------------- Render guards ---------------------------- */
+
+  if (isProgramLoading) return <PageSkeleton />;
+
+  if (programError || !workout) {
     return (
-      <div className="min-h-screen flex flex-col">
+      <div className="flex min-h-screen flex-col">
         <Header />
-        <main className="flex-1 pt-24 pb-16 flex items-center justify-center">
+        <main className="flex flex-1 items-center justify-center pb-16 pt-24">
           <div className="text-center">
-            <p className="text-destructive mb-4">
-              {error || "Workout not found"}
+            <p className="mb-4 text-destructive">
+              {programError?.message || "Workout not found"}
             </p>
             <Link href="/workouts">
               <Button>Back to Workouts</Button>
@@ -416,46 +398,72 @@ export default function WorkoutDetailPage({ params }: WorkoutDetailPageProps) {
     );
   }
 
-  // Group schedule by weeks (4 tuần x 7 ngày)
-  const weeks = Array.from(
-  { length: Math.ceil(workout.schedule.length / 7) },
-  (_, i) => workout.schedule.slice(i * 7, i * 7 + 7),
-);
-const trainingDays = workout.schedule.filter((d) => !d.isRestDay).length;
-const completedCount = completedDays.filter((d) =>
-  workout.schedule.some((s) => s.day === d && !s.isRestDay),
-).length;
-const progress = trainingDays
-  ? Math.round((completedCount / trainingDays) * 100)
-  : 0;
+  /* ------------------------------- Handlers ------------------------------- */
+
+  const handleEnrollClick = () => {
+    if (!user) {
+      router.push("/login");
+      return;
+    }
+
+    // Chương trình trả phí: mở modal thanh toán
+    if (workout.isPremium) {
+      setPricingOpen(true);
+      return;
+    }
+
+    // Chương trình miễn phí: đăng ký thẳng
+    enroll.mutate(id, {
+      onSuccess: () => toast.success("Successfully enrolled in the program!"),
+      onError: (err) => toast.error(err.message || "Failed to enroll."),
+    });
+  };
+
+  const enrollButton = (
+    <Button
+      size="lg"
+      onClick={handleEnrollClick}
+      disabled={enroll.isPending}
+      className="whitespace-nowrap"
+    >
+      {enroll.isPending ? "Enrolling..." : "Enroll Now"}
+    </Button>
+  );
+
+  const difficultyLabel =
+    workout.difficulty.charAt(0).toUpperCase() + workout.difficulty.slice(1);
+
+  /* --------------------------------- UI ----------------------------------- */
 
   return (
-    <div className="min-h-screen flex flex-col">
+    <div className="flex min-h-screen flex-col">
       <Header />
-      <main className="flex-1 pt-24 pb-16">
+      <main className="flex-1 pb-16 pt-24">
         <div className="mx-auto max-w-6xl px-6 lg:px-8">
           {/* Back button */}
           <Link
             href="/workouts"
-            className="flex items-center gap-2 text-primary hover:text-primary/80 mb-8"
+            className="mb-8 flex items-center gap-2 text-primary hover:text-primary/80"
           >
-            <ArrowLeft className="w-4 h-4" />
+            <ArrowLeft className="h-4 w-4" />
             Back to programs
           </Link>
 
           {/* Program header */}
           <div className="mb-12">
-            <div className="flex items-start justify-between gap-4 mb-4">
+            <div className="mb-4 flex items-start justify-between gap-4">
               <div>
-                <div className="flex gap-2 mb-3">
+                <div className="mb-3 flex gap-2">
                   <span
-                    className={`inline-block px-3 py-1 text-xs font-medium rounded-full border ${difficultyColors[workout.difficulty] || "bg-primary/10 text-primary"}`}
+                    className={`inline-block rounded-full border px-3 py-1 text-xs font-medium ${
+                      difficultyColors[workout.difficulty] ||
+                      "bg-primary/10 text-primary"
+                    }`}
                   >
-                    {workout.difficulty.charAt(0).toUpperCase() +
-                      workout.difficulty.slice(1)}
+                    {difficultyLabel}
                   </span>
                   {workout.isPremium && (
-                    <span className="inline-block px-3 py-1 text-xs font-medium rounded-full bg-accent/10 text-accent border border-accent/30">
+                    <span className="inline-block rounded-full border border-accent/30 bg-accent/10 px-3 py-1 text-xs font-medium text-accent">
                       Premium
                     </span>
                   )}
@@ -468,20 +476,10 @@ const progress = trainingDays
                 </p>
               </div>
 
-              {!isEnrolled ? (
-                <Button
-                  size="lg"
-                  onClick={() =>
-                    user
-                      ? setPricingOpen(true)
-                      : (window.location.href = "/login")
-                  }
-                  className="whitespace-nowrap"
-                >
-                  Enroll Now
-                </Button>
-              ) : (
-                <div className="bg-green-500/10 border border-green-500/30 rounded-lg px-4 py-2">
+              {isEnrollmentLoading ? (
+                <Skeleton className="h-11 w-32 rounded-md" />
+              ) : isEnrolled ? (
+                <div className="rounded-lg border border-green-500/30 bg-green-500/10 px-4 py-2">
                   <div className="text-sm font-semibold text-green-600">
                     Enrolled
                   </div>
@@ -489,59 +487,47 @@ const progress = trainingDays
                     Progress: {progress}%
                   </div>
                 </div>
+              ) : (
+                enrollButton
               )}
             </div>
 
             {/* Program stats */}
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mt-8">
-              <div className="flex items-center gap-3">
-                <Clock className="w-5 h-5 text-primary" />
-                <div>
-                  <div className="text-sm text-muted-foreground">
-                    Per Session
-                  </div>
-                  <div className="font-semibold">
-                    {workout.durationPerSession}
-                  </div>
-                </div>
-              </div>
-              <div className="flex items-center gap-3">
-                <Flame className="w-5 h-5 text-accent" />
-                <div>
-                  <div className="text-sm text-muted-foreground">Calories</div>
-                  <div className="font-semibold">
-                    {workout.caloriesPerSession} kcal
-                  </div>
-                </div>
-              </div>
-              <div className="flex items-center gap-3">
-                <Calendar className="w-5 h-5 text-primary" />
-                <div>
-                  <div className="text-sm text-muted-foreground">Duration</div>
-                  <div className="font-semibold">{workout.totalDays} Days</div>
-                </div>
-              </div>
-              <div className="flex items-center gap-3">
-                <Target className="w-5 h-5 text-primary" />
-                <div>
-                  <div className="text-sm text-muted-foreground">Category</div>
-                  <div className="font-semibold capitalize">
-                    {workout.category}
-                  </div>
-                </div>
-              </div>
+            <div className="mt-8 grid grid-cols-2 gap-4 md:grid-cols-4">
+              <StatItem
+                icon={Clock}
+                label="Per Session"
+                value={workout.durationPerSession}
+              />
+              <StatItem
+                icon={Flame}
+                label="Calories"
+                value={`${workout.caloriesPerSession} kcal`}
+                iconClassName="text-accent"
+              />
+              <StatItem
+                icon={Calendar}
+                label="Duration"
+                value={`${workout.totalDays} Days`}
+              />
+              <StatItem
+                icon={Target}
+                label="Category"
+                value={workout.category}
+                valueClassName="capitalize"
+              />
             </div>
           </div>
 
           {/* Goals */}
           <div className="mb-12">
-            <h2 className="text-2xl font-bold mb-4">Program Goals</h2>
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+            <h2 className="mb-4 text-2xl font-bold">Program Goals</h2>
+            <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
               {workout.goals.map((goal, index) => (
-                <Card key={index} className="bg-primary/5 border-primary/20">
-                  <CardContent className="">
+                <Card key={index} className="border-primary/20 bg-primary/5">
+                  <CardContent>
                     <div className="flex items-start gap-3">
-                      <CheckCircle2 className="w-5 h-5 text-primary shrink-0 mt-1" />
+                      <CheckCircle2 className="mt-1 h-5 w-5 shrink-0 text-primary" />
                       <span className="font-medium">{goal}</span>
                     </div>
                   </CardContent>
@@ -550,23 +536,32 @@ const progress = trainingDays
             </div>
           </div>
 
-          {/* 30-Day Schedule */}
-          {isEnrolled ? (
+          {/* Schedule */}
+          {isEnrollmentLoading ? (
+            <div className="space-y-4">
+              <Skeleton className="h-8 w-56" />
+              {Array.from({ length: 4 }).map((_, i) => (
+                <Skeleton key={i} className="h-20 w-full rounded-xl" />
+              ))}
+            </div>
+          ) : isEnrolled ? (
             <div>
-              <h2 className="text-2xl font-bold mb-8">30-Day Schedule</h2>
+              <h2 className="mb-8 text-2xl font-bold">
+                {workout.totalDays}-Day Schedule
+              </h2>
 
               {/* Week tabs */}
-              <div className="flex gap-2 mb-8 overflow-x-auto pb-2">
+              <div className="mb-8 flex gap-2 overflow-x-auto pb-2">
                 {weeks.map((_, i) => (
-  <Button
-    key={i}
-    variant={activeWeek === i + 1 ? "default" : "outline"}
-    onClick={() => setActiveWeek(i + 1)}
-    className="whitespace-nowrap"
-  >
-    Week {i + 1}
-  </Button>
-))}
+                  <Button
+                    key={i}
+                    variant={activeWeek === i + 1 ? "default" : "outline"}
+                    onClick={() => setActiveWeek(i + 1)}
+                    className="whitespace-nowrap"
+                  >
+                    Week {i + 1}
+                  </Button>
+                ))}
               </div>
 
               {/* Week content */}
@@ -583,35 +578,30 @@ const progress = trainingDays
               </div>
             </div>
           ) : (
-            <div className="bg-secondary/30 border-2 border-dashed border-border rounded-xl p-8 text-center">
-              <Lock className="w-12 h-12 text-muted-foreground mx-auto mb-4" />
-              <h3 className="text-xl font-semibold mb-2">Program Locked</h3>
-              <p className="text-muted-foreground mb-6">
-                Enroll in this program to view the full 30-day schedule and
-                start training.
+            <div className="rounded-xl border-2 border-dashed border-border bg-secondary/30 p-8 text-center">
+              <Lock className="mx-auto mb-4 h-12 w-12 text-muted-foreground" />
+              <h3 className="mb-2 text-xl font-semibold">Program Locked</h3>
+              <p className="mb-6 text-muted-foreground">
+                Enroll in this program to view the full {workout.totalDays}-day
+                schedule and start training.
               </p>
-              <Button
-                size="lg"
-                onClick={() =>
-                  user
-                    ? setPricingOpen(true)
-                    : (window.location.href = "/login")
-                }
-              >
-                Enroll Now
-              </Button>
+              {enrollButton}
             </div>
           )}
         </div>
       </main>
 
-      {user && workout && (
+      {user && (
         <PricingModal
           open={pricingOpen}
           onOpenChange={setPricingOpen}
           program={workout}
           userId={user.id}
-          onSuccess={() => window.location.reload()}
+          onSuccess={() => {
+            setPricingOpen(false);
+            // Thay cho window.location.reload(): làm mới enrollment + tiến độ
+            queryClient.invalidateQueries({ queryKey: enrollmentKeys.all });
+          }}
         />
       )}
 
